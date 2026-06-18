@@ -1,0 +1,12 @@
+[project]
+name = "container-docker-shim"
+version = "0.1.0"
+description = "Docker CLI compatibility shim over Apple container for Hermes."
+requires-python = ">=3.11"
+readme = "README.md"
+
+[project.scripts]
+container-docker-shim = "container_docker_shim.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
