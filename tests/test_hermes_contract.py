@@ -394,7 +394,8 @@ class HermesContractTests(unittest.TestCase):
         self.assertIn("no verified Apple container equivalent", result.stderr)
 
     def test_unsupported_command_is_explicit(self) -> None:
-        result = self.docker("compose", "up")
+        # `commit` has no Apple container equivalent and stays refused.
+        result = self.docker("commit", "abc", "img:tag")
         self.assertEqual(result.returncode, 64)
         self.assertIn("unsupported Docker command", result.stderr)
 

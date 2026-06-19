@@ -1,0 +1,1401 @@
+"""`docker compose` subset over Apple `container` — stateless orchestration.
+
+State model
+-----------
+This module persists **nothing** on the macOS host. There is no sidecar
+file, project registry, SQLite database, or cache owned by the shim. All
+durable state lives in Apple `container` (the containers, the project
+network, and named volumes), annotated with Docker-compatible labels:
+
+    com.docker.compose.project           the project a resource belongs to
+    com.docker.compose.service           the service a container implements
+    com.docker.compose.container-number  always 1 (no replicas)
+    com.docker.compose.oneoff            always "False"
+
+Every verb reconstructs the project by querying Apple and filtering on
+these labels — exactly the schema Docker Compose itself uses. `up` reads
+the compose file (it needs the service definitions and dependency order);
+`down`, `ps`, `logs`, and `ls` need only the labels.
+
+Service discovery
+-----------------
+Apple `container` does not resolve service names by DNS without an admin
+`container system dns` domain. Instead, after the services start, this
+module appends ``<ip>  <service>`` lines to **each container's own
+/etc/hosts file** (read the IPs live from `container inspect`). That file
+lives in the container's ephemeral writable layer, so it vanishes when the
+container is removed. The macOS host's /etc/hosts is never touched.
+"""
+
+from __future__ import annotations
+
+import os
+import shlex
+import sys
+import threading
+from typing import Any
+
+from .cli import (
+    DOCKER_ZERO_TIME,
+    ShimError,
+    _container_bin,
+    _die,
+    _load_container_rows,
+    _normalize_cpus,
+    _normalize_memory,
+    _run_container_capture,
+    _run_container_passthrough,
+    _translate_volume,
+)
+
+
+# --------------------------------------------------------------------------- #
+# Label schema (Docker Compose's own keys — Apple stores them verbatim).
+# --------------------------------------------------------------------------- #
+
+LABEL_PROJECT = "com.docker.compose.project"
+LABEL_SERVICE = "com.docker.compose.service"
+LABEL_NUMBER = "com.docker.compose.container-number"
+LABEL_ONEOFF = "com.docker.compose.oneoff"
+
+SUPPORTED_COMPOSE_FILENAMES = (
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+)
+
+# Compose keys that have no verified Apple `container` equivalent. They are
+# parsed (so the file is valid) but not applied; `up` warns once per service
+# so the user is never misled into thinking they took effect.
+UNSUPPORTED_SERVICE_KEYS = {
+    "restart": "restart policies are not supported by Apple container",
+    "healthcheck": "healthchecks are not enforced (depends_on is treated as ordering only)",
+    "privileged": "privileged mode is not supported by Apple container",
+    "hostname": "custom hostname is not supported by Apple container",
+    "secrets": "secrets are a Swarm feature with no Apple container equivalent",
+    "configs": "configs are a Swarm feature with no Apple container equivalent",
+    "extra_hosts": "extra_hosts is not yet translated",
+    "devices": "device mapping is not supported by Apple container",
+    "sysctls": "sysctls are not supported by Apple container",
+}
+
+
+# ========================================================================== #
+# Minimal YAML parser (compose subset)
+#
+# A hand-rolled, dependency-free parser covering the YAML that compose files
+# actually use: indentation-based block maps and sequences, inline flow
+# collections (``[a, b]`` / ``{k: v}``), quoted and bare scalars, and ``#``
+# comments. It is deliberately not a full YAML implementation — anchors,
+# multi-document streams, and ``|``/``>`` block scalars are out of scope.
+# ========================================================================== #
+
+
+def _strip_comment(line: str) -> str:
+    """Drop a trailing ``#`` comment, respecting quotes."""
+    quote: str | None = None
+    for idx, ch in enumerate(line):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "#" and (idx == 0 or line[idx - 1] in (" ", "\t")):
+            return line[:idx]
+    return line
+
+
+def _logical_lines(text: str) -> list[tuple[int, str]]:
+    """Return ``(indent, content)`` for every non-blank, non-comment line."""
+    out: list[tuple[int, str]] = []
+    for raw in text.splitlines():
+        stripped = _strip_comment(raw.replace("\t", "    ")).rstrip()
+        if not stripped.strip():
+            continue
+        if stripped.strip() == "---":  # tolerate a single document marker
+            continue
+        indent = len(stripped) - len(stripped.lstrip(" "))
+        out.append((indent, stripped.strip()))
+    return out
+
+
+def _split_key(content: str) -> tuple[str, str] | None:
+    """Split ``key: value`` at the first unquoted colon. None if not a map line."""
+    quote: str | None = None
+    for idx, ch in enumerate(content):
+        if quote:
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == ":" and (idx + 1 == len(content) or content[idx + 1] == " "):
+            return content[:idx].strip(), content[idx + 1 :].strip()
+    return None
+
+
+def _scalar(token: str) -> Any:
+    """Type a bare scalar token the way compose expects."""
+    token = token.strip()
+    if len(token) >= 2 and token[0] == token[-1] and token[0] in ("'", '"'):
+        return token[1:-1]
+    low = token.lower()
+    if low in ("true", "yes", "on"):
+        return True
+    if low in ("false", "no", "off"):
+        return False
+    if low in ("null", "~", ""):
+        return None
+    try:
+        return int(token)
+    except ValueError:
+        pass
+    try:
+        return float(token)
+    except ValueError:
+        pass
+    return token
+
+
+def _split_flow(body: str) -> list[str]:
+    """Split a flow collection body on top-level commas, respecting nesting."""
+    parts: list[str] = []
+    depth = 0
+    quote: str | None = None
+    buf: list[str] = []
+    for ch in body:
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+            buf.append(ch)
+        elif ch in ("[", "{"):
+            depth += 1
+            buf.append(ch)
+        elif ch in ("]", "}"):
+            depth -= 1
+            buf.append(ch)
+        elif ch == "," and depth == 0:
+            parts.append("".join(buf).strip())
+            buf = []
+        else:
+            buf.append(ch)
+    tail = "".join(buf).strip()
+    if tail:
+        parts.append(tail)
+    return parts
+
+
+def _parse_value(token: str) -> Any:
+    """Parse an inline value: flow sequence, flow mapping, or scalar."""
+    token = token.strip()
+    if token.startswith("[") and token.endswith("]"):
+        return [_parse_value(part) for part in _split_flow(token[1:-1])]
+    if token.startswith("{") and token.endswith("}"):
+        result: dict[str, Any] = {}
+        for part in _split_flow(token[1:-1]):
+            kv = _split_key(part)
+            if kv is None:
+                continue
+            result[str(_scalar(kv[0]))] = _parse_value(kv[1]) if kv[1] else None
+        return result
+    return _scalar(token)
+
+
+def _parse_block(lines: list[tuple[int, str]], i: int, indent: int) -> tuple[Any, int]:
+    first = lines[i][1]
+    if first == "-" or first.startswith("- ") or first.startswith("-\t"):
+        return _parse_seq(lines, i, indent)
+    return _parse_map(lines, i, indent)
+
+
+def _parse_map(lines: list[tuple[int, str]], i: int, indent: int) -> tuple[dict[str, Any], int]:
+    result: dict[str, Any] = {}
+    while i < len(lines):
+        ind, content = lines[i]
+        if ind < indent:
+            break
+        if ind > indent:
+            raise ShimError(f"compose: unexpected indentation near {content!r}", 64)
+        kv = _split_key(content)
+        if kv is None:
+            raise ShimError(f"compose: expected 'key: value' near {content!r}", 64)
+        key, rest = kv
+        key = str(_scalar(key))
+        i += 1
+        if rest:
+            result[key] = _parse_value(rest)
+            continue
+        # Nested block: a deeper map/seq, or a sequence at the same indent.
+        if i < len(lines):
+            nind, ncontent = lines[i]
+            is_seq = ncontent == "-" or ncontent.startswith("- ")
+            if nind > indent:
+                result[key], i = _parse_block(lines, i, nind)
+                continue
+            if nind == indent and is_seq:
+                result[key], i = _parse_seq(lines, i, indent)
+                continue
+        result[key] = None
+    return result, i
+
+
+def _parse_seq(lines: list[tuple[int, str]], i: int, indent: int) -> tuple[list[Any], int]:
+    result: list[Any] = []
+    while i < len(lines):
+        ind, content = lines[i]
+        if ind != indent or not (content == "-" or content.startswith("- ")):
+            break
+        item = content[1:].strip()
+        i += 1
+        if not item:
+            if i < len(lines) and lines[i][0] > indent:
+                value, i = _parse_block(lines, i, lines[i][0])
+            else:
+                value = None
+            result.append(value)
+            continue
+        if _split_key(item) is not None and not item.startswith(("[", "{")):
+            # A mapping that begins inline after the dash: gather its inline
+            # entry plus any deeper continuation lines into one synthetic map.
+            sub: list[tuple[int, str]] = [(indent + 2, item)]
+            while i < len(lines) and lines[i][0] > indent:
+                sub.append(lines[i])
+                i += 1
+            value, _ = _parse_map(sub, 0, indent + 2)
+            result.append(value)
+            continue
+        result.append(_parse_value(item))
+    return result, i
+
+
+def parse_yaml(text: str) -> Any:
+    """Parse a compose-subset YAML document into Python data."""
+    lines = _logical_lines(text)
+    if not lines:
+        return {}
+    value, end = _parse_block(lines, 0, lines[0][0])
+    if end != len(lines):
+        raise ShimError(f"compose: could not parse near {lines[end][1]!r}", 64)
+    return value
+
+
+# ========================================================================== #
+# Environment interpolation (${VAR}, ${VAR:-default}, ${VAR:?msg}, $$)
+# ========================================================================== #
+
+
+def _load_env_file(path: str) -> dict[str, str]:
+    env: dict[str, str] = {}
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export ") :].strip()
+                key, sep, value = line.partition("=")
+                if not sep:
+                    continue
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                    value = value[1:-1]
+                env[key.strip()] = value
+    except FileNotFoundError:
+        pass
+    return env
+
+
+def _interpolate_str(value: str, env: dict[str, str]) -> str:
+    out: list[str] = []
+    i = 0
+    n = len(value)
+    while i < n:
+        ch = value[i]
+        if ch != "$":
+            out.append(ch)
+            i += 1
+            continue
+        if i + 1 < n and value[i + 1] == "$":  # $$ -> literal $
+            out.append("$")
+            i += 2
+            continue
+        if i + 1 < n and value[i + 1] == "{":
+            close = value.find("}", i + 2)
+            if close == -1:
+                out.append(ch)
+                i += 1
+                continue
+            expr = value[i + 2 : close]
+            out.append(_resolve_expr(expr, env))
+            i = close + 1
+            continue
+        # Bare $VAR form.
+        j = i + 1
+        while j < n and (value[j].isalnum() or value[j] == "_"):
+            j += 1
+        name = value[i + 1 : j]
+        if name:
+            out.append(env.get(name, ""))
+            i = j
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _resolve_expr(expr: str, env: dict[str, str]) -> str:
+    for sep, required in ((":?", True), (":-", False), ("?", True), ("-", False)):
+        if sep in expr:
+            name, _, tail = expr.partition(sep)
+            present = env.get(name)
+            if present not in (None, ""):
+                return present
+            if required:
+                raise ShimError(f"compose: required variable {name!r} is unset: {tail}", 1)
+            return tail
+    return env.get(expr, "")
+
+
+def _interpolate(obj: Any, env: dict[str, str]) -> Any:
+    if isinstance(obj, str):
+        return _interpolate_str(obj, env)
+    if isinstance(obj, list):
+        return [_interpolate(item, env) for item in obj]
+    if isinstance(obj, dict):
+        return {key: _interpolate(val, env) for key, val in obj.items()}
+    return obj
+
+
+# ========================================================================== #
+# Project model
+# ========================================================================== #
+
+
+def _sanitize_project_name(raw: str) -> str:
+    """Reduce a name to Docker's project charset: [a-z0-9_-]."""
+    lowered = raw.lower()
+    cleaned = "".join(ch if (ch.isalnum() or ch in "_-") else "_" for ch in lowered)
+    cleaned = cleaned.lstrip("_-")
+    return cleaned or "default"
+
+
+def _as_str(value: Any) -> str:
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if value is None:
+        return ""
+    return str(value)
+
+
+class Service:
+    """A normalized compose service."""
+
+    def __init__(self, name: str, spec: dict[str, Any]):
+        self.name = name
+        self.spec = spec
+        self.depends_on = _parse_depends_on(spec.get("depends_on"))
+
+    @property
+    def container_name(self) -> str | None:
+        value = self.spec.get("container_name")
+        return _as_str(value) if value else None
+
+
+def _parse_depends_on(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [str(item) for item in value]
+    if isinstance(value, dict):  # map form: {db: {condition: ...}}
+        return [str(key) for key in value]
+    return []
+
+
+class Project:
+    """A parsed, interpolated compose project."""
+
+    def __init__(self, name: str, doc: dict[str, Any], directory: str):
+        self.name = name
+        self.directory = directory
+        self.doc = doc
+        raw_services = doc.get("services") or {}
+        if not isinstance(raw_services, dict):
+            raise ShimError("compose: 'services' must be a mapping", 64)
+        self.services: dict[str, Service] = {}
+        for svc_name, spec in raw_services.items():
+            if spec is None:
+                spec = {}
+            if not isinstance(spec, dict):
+                raise ShimError(f"compose: service {svc_name!r} must be a mapping", 64)
+            self.services[str(svc_name)] = Service(str(svc_name), spec)
+        self.networks = doc.get("networks") or {}
+        self.volumes = doc.get("volumes") or {}
+
+    def topo_sorted(self) -> list[Service]:
+        """Services in dependency order (dependencies first), cycle-detected."""
+        ordered: list[Service] = []
+        done: set[str] = set()
+        visiting: set[str] = set()
+
+        def visit(name: str) -> None:
+            if name in done:
+                return
+            if name in visiting:
+                raise ShimError(f"compose: cyclic depends_on involving {name!r}", 64)
+            service = self.services.get(name)
+            if service is None:
+                return  # depends_on a service not defined here — ignore, like Docker
+            visiting.add(name)
+            for dep in service.depends_on:
+                visit(dep)
+            visiting.discard(name)
+            done.add(name)
+            ordered.append(service)
+
+        for svc_name in self.services:
+            visit(svc_name)
+        return ordered
+
+
+# ========================================================================== #
+# Loading & project-name resolution
+# ========================================================================== #
+
+
+def _find_compose_file(explicit: str | None, directory: str) -> str:
+    if explicit:
+        path = explicit if os.path.isabs(explicit) else os.path.join(directory, explicit)
+        if not os.path.isfile(path):
+            raise ShimError(f"compose: file not found: {explicit}", 1)
+        return path
+    for name in SUPPORTED_COMPOSE_FILENAMES:
+        candidate = os.path.join(directory, name)
+        if os.path.isfile(candidate):
+            return candidate
+    raise ShimError(
+        "compose: no compose file found "
+        "(looked for compose.yaml, compose.yml, docker-compose.yaml, docker-compose.yml)",
+        1,
+    )
+
+
+def _load_project(
+    *,
+    file: str | None,
+    project_name: str | None,
+    project_dir: str | None,
+    env_file: str | None,
+) -> Project:
+    directory = os.path.abspath(project_dir or os.getcwd())
+    compose_path = _find_compose_file(file, directory)
+    project_dir_resolved = os.path.abspath(project_dir or os.path.dirname(compose_path))
+
+    with open(compose_path, encoding="utf-8") as handle:
+        raw_doc = parse_yaml(handle.read())
+    if not isinstance(raw_doc, dict):
+        raise ShimError("compose: top-level document must be a mapping", 64)
+
+    env = _load_env_file(env_file or os.path.join(project_dir_resolved, ".env"))
+    env.update(os.environ)  # shell environment overrides .env, like Docker
+    doc = _interpolate(raw_doc, env)
+
+    name = _resolve_project_name(project_name, doc, project_dir_resolved)
+    return Project(name, doc, project_dir_resolved)
+
+
+def _resolve_project_name(explicit: str | None, doc: dict[str, Any], directory: str) -> str:
+    if explicit:
+        return _sanitize_project_name(explicit)
+    env_name = os.environ.get("COMPOSE_PROJECT_NAME")
+    if env_name:
+        return _sanitize_project_name(env_name)
+    if doc.get("name"):
+        return _sanitize_project_name(_as_str(doc["name"]))
+    return _sanitize_project_name(os.path.basename(directory.rstrip("/")) or "default")
+
+
+# ========================================================================== #
+# Service -> `container run` translation
+# ========================================================================== #
+
+
+def _network_resource_name(project: str, network: str) -> str:
+    return f"{project}_{network}"
+
+
+def _volume_resource_name(project: str, volume: str) -> str:
+    return f"{project}_{volume}"
+
+
+def _compose_port_to_publish(port: Any) -> str:
+    """Translate a compose port entry into Apple `-p [ip:]host:container[/proto]`.
+
+    A bare container port (``"6379"``) is published to the identical host
+    port, deterministically — Apple has no random-host-port mode.
+    """
+    spec = _as_str(port)
+    proto = ""
+    if "/" in spec:
+        spec, _, proto = spec.partition("/")
+        proto = f"/{proto}"
+    parts = spec.split(":")
+    if len(parts) == 1:
+        return f"0.0.0.0:{parts[0]}:{parts[0]}{proto}"
+    if len(parts) == 2:
+        host, container = parts
+        # IP-less host:container — bind on all interfaces, like Docker.
+        return f"0.0.0.0:{host}:{container}{proto}"
+    return f"{spec}{proto}"
+
+
+def _translate_environment(spec_env: Any) -> list[str]:
+    args: list[str] = []
+    if isinstance(spec_env, dict):
+        for key, value in spec_env.items():
+            args.extend(["-e", f"{key}={_as_str(value)}"])
+    elif isinstance(spec_env, list):
+        for entry in spec_env:
+            args.extend(["-e", _as_str(entry)])
+    return args
+
+
+def _classify_and_translate_volume(
+    entry: Any, project: Project, ensured_volumes: set[str]
+) -> list[str]:
+    """Translate one compose volume entry into `container run` args.
+
+    Host-path sources (``./data``, ``/abs``) become bind mounts. Bare names
+    are project-scoped Apple **named volumes** (created on demand), mounted
+    with the native ``-v name:/target`` form.
+    """
+    if isinstance(entry, dict):
+        source = _as_str(entry.get("source"))
+        target = _as_str(entry.get("target"))
+        if not target:
+            raise ShimError(f"compose: volume entry missing target: {entry!r}", 64)
+        if entry.get("type") == "bind" or _is_host_path(source):
+            host = _resolve_host_path(source, project.directory)
+            mode = "ro" if entry.get("read_only") is True else ""
+            return _translate_volume(_join_volume(host, target, mode))
+        return _named_volume_args(source, target, "", project, ensured_volumes)
+
+    text = _as_str(entry)
+    parts = text.split(":")
+    if len(parts) < 2:
+        raise ShimError(f"compose: invalid volume entry: {text!r}", 64)
+    source, target = parts[0], parts[1]
+    mode = parts[2] if len(parts) > 2 else ""
+    if _is_host_path(source):
+        host = _resolve_host_path(source, project.directory)
+        return _translate_volume(_join_volume(host, target, mode))
+    return _named_volume_args(source, target, mode, project, ensured_volumes)
+
+
+def _is_host_path(source: str) -> bool:
+    """A compose volume source is a host path if it looks like one, not a name."""
+    return source.startswith((".", "/", "~")) or "/" in source
+
+
+def _resolve_host_path(source: str, project_dir: str) -> str:
+    expanded = os.path.expanduser(source)
+    if os.path.isabs(expanded):
+        return expanded
+    return os.path.normpath(os.path.join(project_dir, expanded))
+
+
+def _join_volume(source: str, target: str, mode: str) -> str:
+    return f"{source}:{target}:{mode}" if mode else f"{source}:{target}"
+
+
+def _named_volume_args(
+    source: str, target: str, mode: str, project: Project, ensured_volumes: set[str]
+) -> list[str]:
+    resource = _volume_resource_name(project.name, source)
+    if resource not in ensured_volumes:
+        _ensure_named_volume(resource, project.name)
+        ensured_volumes.add(resource)
+    spec = f"{resource}:{target}"
+    if mode:
+        spec += f":{mode}"
+    return ["-v", spec]
+
+
+def _service_networks(service: Service, project: Project) -> list[str]:
+    declared = service.spec.get("networks")
+    names: list[str]
+    if isinstance(declared, dict):
+        names = [str(key) for key in declared]
+    elif isinstance(declared, list):
+        names = [str(item) for item in declared]
+    else:
+        names = ["default"]
+    return [_network_resource_name(project.name, name) for name in names]
+
+
+def _build_run_args(
+    service: Service,
+    project: Project,
+    *,
+    image: str,
+    ensured_volumes: set[str],
+    warned: set[str],
+) -> list[str]:
+    spec = service.spec
+    args: list[str] = ["-d"]
+
+    container_name = service.container_name or f"{project.name}-{service.name}-1"
+    args.extend(["--name", container_name])
+
+    # Compose label schema — the entire stateless bookkeeping lives here.
+    args.extend(["--label", f"{LABEL_PROJECT}={project.name}"])
+    args.extend(["--label", f"{LABEL_SERVICE}={service.name}"])
+    args.extend(["--label", f"{LABEL_NUMBER}=1"])
+    args.extend(["--label", f"{LABEL_ONEOFF}=False"])
+    user_labels = spec.get("labels")
+    if isinstance(user_labels, dict):
+        for key, value in user_labels.items():
+            args.extend(["--label", f"{key}={_as_str(value)}"])
+    elif isinstance(user_labels, list):
+        for entry in user_labels:
+            args.extend(["--label", _as_str(entry)])
+
+    for net in _service_networks(service, project):
+        args.extend(["--network", net])
+
+    if spec.get("platform"):
+        args.extend(["--platform", _as_str(spec["platform"])])
+    if spec.get("user"):
+        args.extend(["--user", _as_str(spec["user"])])
+    if spec.get("working_dir"):
+        args.extend(["-w", _as_str(spec["working_dir"])])
+    if spec.get("read_only") is True:
+        args.append("--read-only")
+    if spec.get("init") is True:
+        args.append("--init")
+    if spec.get("tty") is True:
+        args.append("-t")
+    if spec.get("stdin_open") is True:
+        args.append("-i")
+    if spec.get("shm_size"):
+        args.extend(["--shm-size", _as_str(spec["shm_size"])])
+
+    for cap in _as_list(spec.get("cap_add")):
+        args.extend(["--cap-add", _as_str(cap)])
+    for cap in _as_list(spec.get("cap_drop")):
+        args.extend(["--cap-drop", _as_str(cap)])
+    for limit in _as_list(spec.get("ulimits")):
+        args.extend(["--ulimit", _as_str(limit)])
+    for entry in _as_list(spec.get("tmpfs")):
+        args.extend(["--tmpfs", _as_str(entry)])
+
+    cpus, memory = _resource_limits(spec)
+    if cpus:
+        args.extend(["--cpus", _normalize_cpus(cpus)])
+    if memory:
+        args.extend(["--memory", _normalize_memory(memory)])
+
+    args.extend(_translate_environment(spec.get("environment")))
+    for env_file in _as_list(spec.get("env_file")):
+        path = _as_str(env_file)
+        resolved = path if os.path.isabs(path) else os.path.join(project.directory, path)
+        for key, value in _load_env_file(resolved).items():
+            args.extend(["-e", f"{key}={value}"])
+
+    for port in _as_list(spec.get("ports")):
+        args.extend(["-p", _compose_port_to_publish(port)])
+
+    for volume in _as_list(spec.get("volumes")):
+        args.extend(_classify_and_translate_volume(volume, project, ensured_volumes))
+
+    _warn_unsupported(service, warned)
+
+    entrypoint = _as_list(spec.get("entrypoint")) if spec.get("entrypoint") is not None else None
+    command = _command_list(spec.get("command"))
+    positional: list[str] = []
+    if entrypoint:
+        args.extend(["--entrypoint", _as_str(entrypoint[0])])
+        positional.extend(_as_str(item) for item in entrypoint[1:])
+    if command:
+        positional.extend(command)
+
+    args.append(image)
+    args.extend(positional)
+    return args
+
+
+def _as_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _command_list(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [_as_str(item) for item in value]
+    # A bare string command runs through the shell, matching Docker semantics.
+    return ["/bin/sh", "-c", _as_str(value)]
+
+
+def _resource_limits(spec: dict[str, Any]) -> tuple[str, str]:
+    cpus = ""
+    memory = ""
+    deploy = spec.get("deploy")
+    if isinstance(deploy, dict):
+        limits = (deploy.get("resources") or {}).get("limits") if isinstance(deploy.get("resources"), dict) else None
+        if isinstance(limits, dict):
+            if limits.get("cpus"):
+                cpus = _as_str(limits["cpus"])
+            if limits.get("memory"):
+                memory = _as_str(limits["memory"])
+    if spec.get("cpus"):
+        cpus = _as_str(spec["cpus"])
+    if spec.get("mem_limit"):
+        memory = _as_str(spec["mem_limit"])
+    return cpus, memory
+
+
+def _warn_unsupported(service: Service, warned: set[str]) -> None:
+    for key, reason in UNSUPPORTED_SERVICE_KEYS.items():
+        if key in service.spec and key not in warned:
+            _warn(f"service {service.name!r}: '{key}' ignored — {reason}")
+            warned.add(key)
+
+
+# ========================================================================== #
+# Apple-store queries (the only place project state is read from)
+# ========================================================================== #
+
+
+def _project_containers(project: str) -> list[dict[str, Any]]:
+    code, rows, err = _load_container_rows(all_containers=True)
+    if code != 0:
+        raise ShimError(err.strip() or "compose: could not list containers", code)
+    members = [row for row in rows if (row.get("labels") or {}).get(LABEL_PROJECT) == project]
+    members.sort(key=lambda r: (r.get("labels") or {}).get(LABEL_SERVICE, ""))
+    return members
+
+
+def _all_projects() -> dict[str, list[dict[str, Any]]]:
+    code, rows, err = _load_container_rows(all_containers=True)
+    if code != 0:
+        raise ShimError(err.strip() or "compose: could not list containers", code)
+    projects: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        name = (row.get("labels") or {}).get(LABEL_PROJECT)
+        if name:
+            projects.setdefault(name, []).append(row)
+    return projects
+
+
+def _load_labeled_resources(family: str, project: str) -> list[str]:
+    """Return names of `network`/`volume` resources owned by ``project``."""
+    result = _run_container_capture([family, "list", "--format", "json"])
+    if result.returncode != 0:
+        return []
+    import json
+
+    try:
+        data = json.loads(result.stdout or "[]")
+    except ValueError:
+        return []
+    if not isinstance(data, list):
+        return []
+    owned: list[str] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        config = item.get("configuration") if isinstance(item.get("configuration"), dict) else item
+        labels = config.get("labels") if isinstance(config, dict) else None
+        name = (config.get("name") if isinstance(config, dict) else None) or item.get("id")
+        if isinstance(labels, dict) and labels.get(LABEL_PROJECT) == project and name:
+            owned.append(str(name))
+    return owned
+
+
+def _container_ipv4(name: str) -> str | None:
+    result = _run_container_capture(["inspect", name])
+    if result.returncode != 0:
+        return None
+    import json
+
+    try:
+        data = json.loads(result.stdout or "[]")
+    except ValueError:
+        return None
+    item = data[0] if isinstance(data, list) and data else data
+    if not isinstance(item, dict):
+        return None
+    networks = (item.get("status") or {}).get("networks") or []
+    for net in networks:
+        addr = net.get("ipv4Address") if isinstance(net, dict) else None
+        if addr:
+            return str(addr).split("/")[0]
+    return None
+
+
+# ========================================================================== #
+# Resource provisioning
+# ========================================================================== #
+
+
+def _ensure_network(project: str, network: str) -> None:
+    resource = _network_resource_name(project, network)
+    existing = _run_container_capture(["network", "inspect", resource])
+    if existing.returncode == 0:
+        return
+    spec = (_project_network_spec(project, network))
+    if spec.get("external"):
+        _warn(f"network {network!r} declared external — not created")
+        return
+    args = ["network", "create", "--label", f"{LABEL_PROJECT}={project}"]
+    if spec.get("internal") is True:
+        args.append("--internal")
+    args.append(resource)
+    result = _run_container_capture(args)
+    if result.returncode != 0:
+        raise ShimError(
+            f"compose: failed to create network {resource}: "
+            f"{(result.stderr or result.stdout).strip()}",
+            result.returncode,
+        )
+
+
+_NETWORK_SPECS: dict[tuple[str, str], dict[str, Any]] = {}
+
+
+def _project_network_spec(project: str, network: str) -> dict[str, Any]:
+    return _NETWORK_SPECS.get((project, network), {})
+
+
+def _ensure_named_volume(resource: str, project: str) -> None:
+    existing = _run_container_capture(["volume", "inspect", resource])
+    if existing.returncode == 0:
+        return
+    result = _run_container_capture(
+        ["volume", "create", "--label", f"{LABEL_PROJECT}={project}", resource]
+    )
+    if result.returncode != 0:
+        raise ShimError(
+            f"compose: failed to create volume {resource}: "
+            f"{(result.stderr or result.stdout).strip()}",
+            result.returncode,
+        )
+
+
+# ========================================================================== #
+# Service discovery via each container's own /etc/hosts
+# ========================================================================== #
+
+
+def _inject_peer_hostnames(project: Project, services: list[Service]) -> None:
+    """Make services resolvable by name inside the project.
+
+    Reads each running container's IPv4 from `container inspect`, then appends
+    ``<ip>  <service>`` lines to **each container's own /etc/hosts file** via
+    `container exec`. This file is in the container's ephemeral layer and is
+    discarded when the container is removed. The macOS host's /etc/hosts is
+    never read or written.
+    """
+    addresses: list[tuple[str, str]] = []
+    for service in services:
+        name = service.container_name or f"{project.name}-{service.name}-1"
+        ip = _container_ipv4(name)
+        if ip:
+            addresses.append((service.name, ip))
+
+    if len(addresses) < 2:
+        return  # nothing to resolve between
+
+    lines = [f"{ip} {svc}" for svc, ip in addresses]
+    printf_args = " ".join(shlex.quote(line) for line in lines)
+    script = f'printf "%s\\n" {printf_args} >> /etc/hosts'
+    for service in services:
+        name = service.container_name or f"{project.name}-{service.name}-1"
+        _run_container_capture(["exec", name, "sh", "-c", script])
+
+
+# ========================================================================== #
+# Verbs
+# ========================================================================== #
+
+
+def _remove_containers(rows: list[dict[str, Any]]) -> int:
+    rc = 0
+    for row in rows:
+        ident = row.get("id") or row.get("name")
+        if not ident:
+            continue
+        stop = _run_container_capture(["stop", ident])
+        if stop.returncode != 0 and row.get("state") == "running":
+            sys.stderr.write(stop.stderr or stop.stdout)
+            rc = stop.returncode
+        remove = _run_container_capture(["rm", ident])
+        if remove.returncode != 0:
+            sys.stderr.write(remove.stderr or remove.stdout)
+            rc = remove.returncode
+        else:
+            print(f"Removed {row.get('name') or ident}")
+    return rc
+
+
+def cmd_up(project: Project, *, detach: bool, build: bool, only: list[str], no_build: bool) -> int:
+    services = project.topo_sorted()
+    if only:
+        wanted = set(only)
+        services = [svc for svc in services if svc.name in wanted]
+        if not services:
+            return _die(f"compose: no such service(s): {', '.join(only)}", 1)
+
+    # Provision declared networks (record specs for ensure-on-attach), defaulting
+    # to the implicit project network every service joins.
+    for net_name, net_spec in _network_dict(project).items():
+        _NETWORK_SPECS[(project.name, net_name)] = net_spec if isinstance(net_spec, dict) else {}
+    _ensure_network(project.name, "default")
+    referenced: set[str] = {"default"}
+    for service in services:
+        declared = service.spec.get("networks")
+        if isinstance(declared, dict):
+            referenced.update(str(k) for k in declared)
+        elif isinstance(declared, list):
+            referenced.update(str(k) for k in declared)
+    for net in referenced:
+        _ensure_network(project.name, net)
+
+    # Idempotent: clear this project's previous containers before recreating.
+    existing = _project_containers(project.name)
+    if only:
+        existing = [r for r in existing if (r.get("labels") or {}).get(LABEL_SERVICE) in set(only)]
+    if existing:
+        _remove_containers(existing)
+
+    ensured_volumes: set[str] = set()
+    warned: set[str] = set()
+    started: list[Service] = []
+    for service in services:
+        image = _resolve_image(service, project, build=build, no_build=no_build)
+        run_args = _build_run_args(
+            service, project, image=image, ensured_volumes=ensured_volumes, warned=warned
+        )
+        print(f"Creating {project.name}-{service.name}-1 ...")
+        result = _run_container_capture(["run", *run_args])
+        if result.returncode != 0:
+            sys.stderr.write(result.stderr or result.stdout)
+            return result.returncode
+        started.append(service)
+
+    _inject_peer_hostnames(project, started)
+
+    if detach:
+        return 0
+    # Foreground: stream the logs of every started service until interrupted.
+    return _stream_logs(project, started, follow=True)
+
+
+def cmd_down(project_name: str, *, remove_volumes: bool, only: list[str]) -> int:
+    rows = _project_containers(project_name)
+    if only:
+        wanted = set(only)
+        rows = [r for r in rows if (r.get("labels") or {}).get(LABEL_SERVICE) in wanted]
+    if not rows and not only:
+        _warn(f"no containers found for project {project_name!r}")
+    rc = _remove_containers(rows)
+
+    if only:
+        return rc  # partial down never tears down shared infrastructure
+
+    for network in _load_labeled_resources("network", project_name):
+        result = _run_container_capture(["network", "rm", network])
+        if result.returncode == 0:
+            print(f"Removed network {network}")
+        else:
+            sys.stderr.write(result.stderr or result.stdout)
+            rc = rc or result.returncode
+
+    if remove_volumes:
+        for volume in _load_labeled_resources("volume", project_name):
+            result = _run_container_capture(["volume", "rm", volume])
+            if result.returncode == 0:
+                print(f"Removed volume {volume}")
+            else:
+                sys.stderr.write(result.stderr or result.stdout)
+                rc = rc or result.returncode
+    return rc
+
+
+def cmd_ps(project_name: str, *, quiet: bool, show_all: bool) -> int:
+    rows = _project_containers(project_name)
+    if not show_all:
+        rows = [r for r in rows if r.get("state") == "running"]
+    if quiet:
+        for row in rows:
+            print(row.get("id", ""))
+        return 0
+    print("NAME\tIMAGE\tSTATE\tSERVICE")
+    for row in rows:
+        service = (row.get("labels") or {}).get(LABEL_SERVICE, "")
+        print(f"{row.get('name', '')}\t{row.get('image', '')}\t{row.get('state', '')}\t{service}")
+    return 0
+
+
+def cmd_logs(project: Project | None, project_name: str, *, follow: bool, only: list[str]) -> int:
+    rows = _project_containers(project_name)
+    if only:
+        wanted = set(only)
+        rows = [r for r in rows if (r.get("labels") or {}).get(LABEL_SERVICE) in wanted]
+    if not rows:
+        return _die(f"compose: no running containers for project {project_name!r}", 1)
+    services = [
+        _Stub((row.get("labels") or {}).get(LABEL_SERVICE, ""), row.get("name", ""))
+        for row in rows
+    ]
+    return _stream_logs(None, services, follow=follow)
+
+
+def cmd_ls() -> int:
+    projects = _all_projects()
+    print("NAME\tSTATUS")
+    for name in sorted(projects):
+        rows = projects[name]
+        running = sum(1 for row in rows if row.get("state") == "running")
+        print(f"{name}\trunning({running})")
+    return 0
+
+
+def cmd_config(project: Project) -> int:
+    import json
+
+    services = {svc.name: svc.spec for svc in project.topo_sorted()}
+    rendered = {
+        "name": project.name,
+        "services": services,
+        "networks": project.networks,
+        "volumes": project.volumes,
+    }
+    print(json.dumps(rendered, indent=2, default=_as_str))
+    return 0
+
+
+def cmd_build(project: Project, *, only: list[str]) -> int:
+    services = project.topo_sorted()
+    if only:
+        wanted = set(only)
+        services = [svc for svc in services if svc.name in wanted]
+    built = 0
+    for service in services:
+        if "build" not in service.spec:
+            continue
+        image = _resolve_image(service, project, build=True, no_build=False)
+        print(f"Built {image} for service {service.name}")
+        built += 1
+    if built == 0:
+        _warn("no services with a 'build:' section")
+    return 0
+
+
+# ========================================================================== #
+# Image resolution & build
+# ========================================================================== #
+
+
+def _resolve_image(service: Service, project: Project, *, build: bool, no_build: bool) -> str:
+    spec = service.spec
+    if "build" in spec and not no_build:
+        tag = _as_str(spec.get("image")) or f"{project.name}-{service.name}"
+        if build or not _image_exists(tag):
+            _run_build(service, project, tag)
+        return tag
+    image = _as_str(spec.get("image"))
+    if not image:
+        raise ShimError(f"compose: service {service.name!r} has neither 'image' nor 'build'", 64)
+    return image
+
+
+def _image_exists(tag: str) -> bool:
+    result = _run_container_capture(["image", "inspect", tag])
+    return result.returncode == 0
+
+
+def _run_build(service: Service, project: Project, tag: str) -> None:
+    build = service.spec["build"]
+    if isinstance(build, str):
+        context = build
+        dockerfile = None
+        build_args: dict[str, Any] = {}
+    elif isinstance(build, dict):
+        context = _as_str(build.get("context") or ".")
+        dockerfile = build.get("dockerfile")
+        raw_args = build.get("args") or {}
+        build_args = raw_args if isinstance(raw_args, dict) else {}
+    else:
+        raise ShimError(f"compose: service {service.name!r} has an invalid 'build'", 64)
+
+    context_path = context if os.path.isabs(context) else os.path.join(project.directory, context)
+    args = ["build", "--tag", tag]
+    if dockerfile:
+        df = _as_str(dockerfile)
+        df_path = df if os.path.isabs(df) else os.path.join(context_path, df)
+        args.extend(["--file", df_path])
+    for key, value in build_args.items():
+        args.extend(["--build-arg", f"{key}={_as_str(value)}"])
+    args.append(context_path)
+
+    print(f"Building {tag} for service {service.name} ...")
+    result = _run_container_passthrough(args)
+    if result != 0:
+        raise ShimError(f"compose: build failed for service {service.name!r}", result)
+
+
+def _network_dict(project: Project) -> dict[str, Any]:
+    networks = project.networks
+    if isinstance(networks, dict):
+        return networks
+    return {}
+
+
+# ========================================================================== #
+# Log streaming
+# ========================================================================== #
+
+
+class _Stub:
+    """Minimal service-like object for log streaming of existing containers."""
+
+    def __init__(self, name: str, container_name: str):
+        self.name = name
+        self._container_name = container_name
+
+    @property
+    def container_name(self) -> str:
+        return self._container_name
+
+
+def _stream_logs(project: Project | None, services: list[Any], *, follow: bool) -> int:
+    targets: list[tuple[str, str]] = []
+    for service in services:
+        if isinstance(service, _Stub):
+            name = service.container_name
+        else:
+            name = service.container_name or f"{project.name}-{service.name}-1"  # type: ignore[union-attr]
+        targets.append((service.name, name))
+
+    if not targets:
+        return 0
+    if len(targets) == 1 or not follow:
+        rc = 0
+        for label, name in targets:
+            args = ["logs"]
+            if follow:
+                args.append("--follow")
+            args.append(name)
+            result = _run_container_passthrough(args)
+            rc = rc or result
+        return rc
+
+    # Multiple services + follow: one thread per container, prefixed output.
+    threads: list[threading.Thread] = []
+    for label, name in targets:
+        thread = threading.Thread(target=_follow_prefixed, args=(label, name), daemon=True)
+        thread.start()
+        threads.append(thread)
+    try:
+        for thread in threads:
+            thread.join()
+    except KeyboardInterrupt:
+        return 130
+    return 0
+
+
+def _follow_prefixed(label: str, name: str) -> None:
+    import subprocess
+
+    proc = subprocess.Popen(
+        [_container_bin(), "logs", "--follow", name],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        sys.stdout.write(f"{label}  | {line}")
+        sys.stdout.flush()
+
+
+# ========================================================================== #
+# Entry point
+# ========================================================================== #
+
+
+def _warn(message: str) -> None:
+    print(f"container-docker-shim: compose: {message}", file=sys.stderr)
+
+
+_USAGE = (
+    "docker compose [-f FILE] [-p NAME] <up|down|ps|logs|build|config|ls> [options]"
+)
+
+
+def main(argv: list[str]) -> int:
+    """Parse `docker compose` global flags, then dispatch the subcommand."""
+    file: str | None = None
+    project_name: str | None = None
+    project_dir: str | None = None
+    env_file: str | None = None
+
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg in ("-f", "--file"):
+            file, i = _take(argv, i, arg)
+            continue
+        if arg in ("-p", "--project-name"):
+            project_name, i = _take(argv, i, arg)
+            continue
+        if arg == "--project-directory":
+            project_dir, i = _take(argv, i, arg)
+            continue
+        if arg == "--env-file":
+            env_file, i = _take(argv, i, arg)
+            continue
+        if arg.startswith("--file="):
+            file = arg.split("=", 1)[1]
+            i += 1
+            continue
+        if arg.startswith("--project-name="):
+            project_name = arg.split("=", 1)[1]
+            i += 1
+            continue
+        if arg in ("-h", "--help"):
+            print(_USAGE)
+            return 0
+        break
+
+    rest = argv[i:]
+    if not rest:
+        print(_USAGE)
+        return 0
+    sub, sub_args = rest[0], rest[1:]
+
+    try:
+        return _dispatch(
+            sub,
+            sub_args,
+            file=file,
+            project_name=project_name,
+            project_dir=project_dir,
+            env_file=env_file,
+        )
+    except ShimError as exc:
+        return _die(str(exc), exc.code)
+
+
+def _dispatch(
+    sub: str,
+    sub_args: list[str],
+    *,
+    file: str | None,
+    project_name: str | None,
+    project_dir: str | None,
+    env_file: str | None,
+) -> int:
+    def project() -> Project:
+        return _load_project(
+            file=file, project_name=project_name, project_dir=project_dir, env_file=env_file
+        )
+
+    def resolved_name() -> str:
+        # down/ps/logs need only the project name; avoid requiring a compose file.
+        if project_name:
+            return _sanitize_project_name(project_name)
+        env_name = os.environ.get("COMPOSE_PROJECT_NAME")
+        if env_name:
+            return _sanitize_project_name(env_name)
+        try:
+            return project().name
+        except ShimError:
+            directory = os.path.abspath(project_dir or os.getcwd())
+            return _sanitize_project_name(os.path.basename(directory.rstrip("/")) or "default")
+
+    if sub == "up":
+        opts = _parse_flags(sub_args, bools={"-d", "--detach", "--build", "--no-build"})
+        return cmd_up(
+            project(),
+            detach=opts.flag("-d") or opts.flag("--detach"),
+            build=opts.flag("--build"),
+            no_build=opts.flag("--no-build"),
+            only=opts.positionals,
+        )
+    if sub == "down":
+        opts = _parse_flags(sub_args, bools={"-v", "--volumes"})
+        return cmd_down(
+            resolved_name(),
+            remove_volumes=opts.flag("-v") or opts.flag("--volumes"),
+            only=opts.positionals,
+        )
+    if sub == "ps":
+        opts = _parse_flags(sub_args, bools={"-q", "--quiet", "-a", "--all"})
+        return cmd_ps(
+            resolved_name(),
+            quiet=opts.flag("-q") or opts.flag("--quiet"),
+            show_all=opts.flag("-a") or opts.flag("--all"),
+        )
+    if sub == "logs":
+        opts = _parse_flags(sub_args, bools={"-f", "--follow"})
+        return cmd_logs(
+            None,
+            resolved_name(),
+            follow=opts.flag("-f") or opts.flag("--follow"),
+            only=opts.positionals,
+        )
+    if sub == "build":
+        opts = _parse_flags(sub_args, bools=set())
+        return cmd_build(project(), only=opts.positionals)
+    if sub == "config":
+        return cmd_config(project())
+    if sub == "ls":
+        return cmd_ls()
+    return _die(f"compose: unsupported subcommand: {sub}", 64)
+
+
+# --------------------------------------------------------------------------- #
+# Tiny flag parser for subcommands (boolean flags + positional service names).
+# --------------------------------------------------------------------------- #
+
+
+class _Flags:
+    def __init__(self, present: set[str], positionals: list[str]):
+        self._present = present
+        self.positionals = positionals
+
+    def flag(self, name: str) -> bool:
+        return name in self._present
+
+
+def _parse_flags(argv: list[str], *, bools: set[str]) -> _Flags:
+    present: set[str] = set()
+    positionals: list[str] = []
+    for arg in argv:
+        if arg in bools:
+            present.add(arg)
+        elif arg.startswith("-"):
+            raise ShimError(f"compose: unsupported option: {arg}", 64)
+        else:
+            positionals.append(arg)
+    return _Flags(present, positionals)
+
+
+def _take(argv: list[str], index: int, opt: str) -> tuple[str, int]:
+    if index + 1 >= len(argv):
+        raise ShimError(f"compose: {opt} requires a value", 64)
+    return argv[index + 1], index + 2

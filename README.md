@@ -6,8 +6,11 @@ installing Docker Desktop, Podman, or a third-party adapter.
 
 It is a **stateless translator**, not a Docker replacement: it maps the Docker
 commands with a clean Apple `container` equivalent and fails loudly on the rest.
-Stateful features (compose, event streams) are deliberately out of scope. Apple
-`container` is the single source of truth — the shim persists nothing.
+Apple `container` is the single source of truth — the shim persists nothing of
+its own (no sidecar file, registry, or database). Even `docker compose` is
+stateless: project membership is stored as labels **in Apple's own object
+store**, exactly as Docker Compose does, so every verb reconstructs the project
+by querying Apple rather than reading shim-owned state.
 
 ## Install
 
@@ -90,10 +93,46 @@ translated — Go-template `--format` on `ls`-style commands is refused rather
 than mis-forwarded, and subcommands Apple lacks (e.g. `network connect`) fail
 loudly.
 
+### Compose (stateless orchestration)
+
+`docker compose up/down/ps/logs/build/config/ls` orchestrate multi-service
+stacks **without persisting any shim-owned state**. Apple `container` has no
+native compose, so the shim parses the compose file and issues a sequence of
+`container` commands — but it keeps no project file. Instead every resource is
+tagged with Docker's own label schema (`com.docker.compose.project`,
+`com.docker.compose.service`, …) on the containers, the project network, and any
+named volumes. `down`/`ps`/`logs`/`ls` reconstruct the project purely by
+querying Apple and filtering on those labels; only `up`/`build`/`config` need to
+read the compose file.
+
+- **Project name** resolves like Docker: `-p NAME` → `COMPOSE_PROJECT_NAME` →
+  the file's `name:` → the directory basename.
+- **Service discovery.** Apple does not resolve service names by DNS without an
+  admin `container system dns` domain. Instead, after services start, the shim
+  appends `<ip>  <service>` lines to **each container's own `/etc/hosts` file**
+  (IPs read live from `container inspect`). That file lives in the container's
+  ephemeral layer and is discarded when the container is removed — **the macOS
+  host's `/etc/hosts` is never touched.**
+- **Named volumes** map onto Apple-native volumes (`container volume create`),
+  scoped as `<project>_<volume>`. Host-path mounts become bind mounts, with
+  relative paths resolved against the compose file's directory.
+- **Teardown is self-coherent.** `down` removes the project's containers (found
+  by label), then removes the network — and `-v` the volumes — **only if the
+  shim created them** (verified via the project label), never external ones.
+- **`up` is idempotent**: it removes the project's previous containers before
+  recreating, so re-running never accumulates duplicates.
+- **YAML** is parsed by a small dependency-free subset parser (block maps and
+  sequences, flow collections, quoted scalars, comments, and `${VAR:-default}`
+  interpolation). Anchors, multi-document streams, and `|`/`>` block scalars are
+  out of scope.
+
+Compose keys with no Apple equivalent (`restart`, `healthcheck`, `privileged`,
+`hostname`, `secrets`, `configs`, `deploy` replicas, …) are parsed but ignored,
+with a one-line warning per key so behavior is never silently misrepresented.
+
 ### Refused, by design
 
-Commands and flags with no verified Apple equivalent fail loudly: `docker compose`
-(needs persistent project state — out of scope for a stateless shim),
+Commands and flags with no verified Apple equivalent fail loudly:
 `docker system events` (a stateful watcher), `docker commit`/`diff`/`rename`/
 `history`/`import` (no Apple equivalent), `docker run --network=none`,
 `docker run --add-host/--hostname`, and any unknown command.
@@ -110,15 +149,22 @@ Commands and flags with no verified Apple equivalent fail loudly: `docker compos
 
 The shim is stateless. It does not persist Docker-shaped metadata, cache files,
 or a support directory. Apple `container` is the source of truth; direct Apple
-container changes are reflected on the next shim command.
+container changes are reflected on the next shim command. Compose is no
+exception: project bookkeeping lives in Apple's label store, not in any
+shim-owned file — see the Compose section above.
 
 ## Tests
 
-Unit tests use a fake `container` binary and do not start real containers:
+Unit tests use a fake `container` binary and do not start real containers. This
+covers the Hermes contract (`tests/test_hermes_contract.py`) and compose —
+parser, interpolation, topo sort, translation, and label-based orchestration
+(`tests/test_compose.py`):
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
 Live smoke testing against Apple `container` is intentionally manual because it
-starts and removes containers.
+starts and removes containers. The compose path has been verified end-to-end
+against Apple `container` 1.0.0 (multi-service `up`, label reconstruction,
+service-name resolution, `build:`, named volumes, and clean `down`/`down -v`).

@@ -1262,6 +1262,8 @@ def print_help() -> None:
     print("Translated:  version, info, build, run, create, ps, inspect,")
     print("             image inspect, start, exec, stop, restart, rm, logs, cp,")
     print("             stats, export, login, logout, system prune")
+    print("Compose:     compose up/down/ps/logs/build/config/ls (stateless;")
+    print("             project state lives in Apple container labels)")
     print("Passthrough: images, pull, push, tag, save, load, rmi, image <sub>,")
     print("             network <sub>, volume <sub>, kill")
     print("Unsupported Docker commands and flags fail with a clear, explicit error.")
@@ -1335,6 +1337,10 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_system(rest)
         if command == "kill":
             return cmd_proxy([command, *rest])
+        if command == "compose":
+            from . import compose
+
+            return compose.main(rest)
         return _unsupported(command)
     except ShimError as exc:
         return _die(str(exc), exc.code)
