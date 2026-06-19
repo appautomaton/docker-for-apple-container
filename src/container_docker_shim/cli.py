@@ -233,6 +233,13 @@ def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
             or _deep_get(item, "status", "terminatedDate")
             or item.get("finishedAt")
             or item.get("FinishedAt")
+            # Apple container 1.0.0 records no finish time on a stopped
+            # container (only creationDate/startedDate). Fall back so Hermes'
+            # orphan reaper sees a real, parseable, past timestamp — not the
+            # zero-value it reads as "never finished" and refuses to reap,
+            # which would leak every exited container forever.
+            or _deep_get(item, "status", "startedDate")
+            or _deep_get(item, "configuration", "creationDate")
             or DOCKER_ZERO_TIME
         ),
     }
