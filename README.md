@@ -116,6 +116,17 @@ read the compose file.
   (IPs read live from `container inspect`). That file lives in the container's
   ephemeral layer and is discarded when the container is removed — **the macOS
   host's `/etc/hosts` is never touched.**
+- **`host.docker.internal`.** The same `/etc/hosts` injection also publishes
+  `host.docker.internal` and `gateway.docker.internal` pointing at the
+  container's gateway — which, on Apple `container`, **is the macOS host.** This
+  mirrors Docker Desktop (which adds these names automatically on macOS/Windows),
+  so a service that dials the host by that name — e.g. `http://host.docker.internal:8317`
+  — works unchanged. The gateway is read per-network from `container inspect`
+  (not hardcoded); injection is idempotent and skipped with a warning on
+  shell-less images (e.g. distroless). It is **compose-only** — bare
+  `docker run` is left alone, since injecting into a possibly short-lived
+  container would race its exit (Apple has no `--add-host` flag to set it at
+  creation, so it must be done via a post-start `exec`).
 - **Named volumes** map onto Apple-native volumes (`container volume create`),
   scoped as `<project>_<volume>`. Host-path mounts become bind mounts, with
   relative paths resolved against the compose file's directory.

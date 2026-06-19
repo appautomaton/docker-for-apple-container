@@ -96,7 +96,8 @@ if a[:1] == ["run"]:
                           "image": {"reference": image or ""}},
         "status": {"state": "running",
                    "networks": [{"network": networks[0] if networks else "default",
-                                 "ipv4Address": ip + "/24"}]},
+                                 "ipv4Address": ip + "/24",
+                                 "ipv4Gateway": "192.168.65.1"}]},
     }
     save(d); print(name); raise SystemExit(0)
 
@@ -406,6 +407,46 @@ class ComposeE2ETests(unittest.TestCase):
         joined = " ".join(" ".join(e["cmd"]) for e in hosts_writes)
         self.assertIn("web", joined)
         self.assertIn("db", joined)
+
+    def test_up_injects_host_docker_internal(self) -> None:
+        # Multi-service /etc/hosts writes must also publish the host-gateway
+        # aliases (Docker Desktop parity), pointing at the network gateway, and
+        # be guarded so a re-run never duplicates the entry.
+        self.write_compose(
+            """
+            services:
+              web:
+                image: nginx:latest
+              db:
+                image: postgres:16
+            """
+        )
+        self.assertEqual(self.docker("compose", "up", "-d").returncode, 0)
+        state = self.load_state()
+        hosts_writes = [e for e in state["exec_log"] if "/etc/hosts" in " ".join(e["cmd"])]
+        for entry in hosts_writes:
+            script = " ".join(entry["cmd"])
+            self.assertIn("192.168.65.1 host.docker.internal gateway.docker.internal", script)
+            self.assertIn("grep -qxF", script)  # idempotent guard
+
+    def test_single_service_still_gets_host_gateway(self) -> None:
+        # A lone service has no peers to resolve, but must still get
+        # host.docker.internal — the old peers-only path skipped it entirely.
+        self.write_compose(
+            """
+            services:
+              solo:
+                image: nginx:latest
+            """
+        )
+        self.assertEqual(self.docker("compose", "up", "-d").returncode, 0)
+        state = self.load_state()
+        hosts_writes = [e for e in state["exec_log"] if "/etc/hosts" in " ".join(e["cmd"])]
+        self.assertEqual(len(hosts_writes), 1)
+        script = " ".join(hosts_writes[0]["cmd"])
+        self.assertIn("host.docker.internal", script)
+        # No peer line for itself (single service → no <ip> solo entry).
+        self.assertNotIn(" solo", script)
 
     def test_ps_reconstructs_from_labels(self) -> None:
         self.write_compose(

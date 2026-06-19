@@ -25,6 +25,12 @@ module appends ``<ip>  <service>`` lines to **each container's own
 /etc/hosts file** (read the IPs live from `container inspect`). That file
 lives in the container's ephemeral writable layer, so it vanishes when the
 container is removed. The macOS host's /etc/hosts is never touched.
+
+The same injection also publishes ``host.docker.internal`` and
+``gateway.docker.internal`` → the container's gateway (which, on Apple
+`container`, is the macOS host). Docker Desktop does this automatically on
+macOS/Windows; Apple `container` has no `--add-host` flag, so reproducing it
+here lets images that dial the host by that name work unchanged.
 """
 
 from __future__ import annotations
@@ -824,25 +830,37 @@ def _load_labeled_resources(family: str, project: str) -> list[str]:
     return owned
 
 
-def _container_ipv4(name: str) -> str | None:
+def _container_net(name: str) -> tuple[str | None, str | None]:
+    """Return ``(ipv4, gateway)`` for a container's first network, or ``(None, None)``.
+
+    Both come from the same ``status.networks[]`` block of ``container inspect``
+    so a single call yields the container's own address *and* the gateway —
+    which, on Apple `container`, is the macOS host (Docker Desktop's
+    ``host.docker.internal``). Addresses are stripped of their CIDR suffix.
+    """
     result = _run_container_capture(["inspect", name])
     if result.returncode != 0:
-        return None
+        return None, None
     import json
 
     try:
         data = json.loads(result.stdout or "[]")
     except ValueError:
-        return None
+        return None, None
     item = data[0] if isinstance(data, list) and data else data
     if not isinstance(item, dict):
-        return None
+        return None, None
     networks = (item.get("status") or {}).get("networks") or []
     for net in networks:
-        addr = net.get("ipv4Address") if isinstance(net, dict) else None
+        if not isinstance(net, dict):
+            continue
+        addr = net.get("ipv4Address")
+        gateway = net.get("ipv4Gateway")
         if addr:
-            return str(addr).split("/")[0]
-    return None
+            ip = str(addr).split("/")[0]
+            gw = str(gateway).split("/")[0] if gateway else None
+            return ip, gw
+    return None, None
 
 
 # ========================================================================== #
@@ -899,31 +917,63 @@ def _ensure_named_volume(resource: str, project: str) -> None:
 # ========================================================================== #
 
 
-def _inject_peer_hostnames(project: Project, services: list[Service]) -> None:
-    """Make services resolvable by name inside the project.
+# Docker Desktop auto-publishes these names (both → the host) into every
+# container's /etc/hosts on macOS/Windows. Apple `container` does not, and has
+# no `--add-host` flag, so we reproduce it via the same per-container injection.
+_HOST_ALIASES = "host.docker.internal gateway.docker.internal"
 
-    Reads each running container's IPv4 from `container inspect`, then appends
-    ``<ip>  <service>`` lines to **each container's own /etc/hosts file** via
-    `container exec`. This file is in the container's ephemeral layer and is
-    discarded when the container is removed. The macOS host's /etc/hosts is
-    never read or written.
+
+def _inject_etc_hosts(project: Project, services: list[Service]) -> None:
+    """Populate each container's own /etc/hosts with peer + host-gateway names.
+
+    Two things are injected per container, via `container exec`:
+
+    1. **Peer service names** (``<ip> <service>``) so services resolve each
+       other by name — only meaningful when the project has ≥2 services.
+    2. **``host.docker.internal`` / ``gateway.docker.internal``** → the
+       container's gateway, which on Apple `container` *is* the macOS host.
+       This mirrors Docker Desktop, so images that dial the host by that name
+       (a very common Docker-on-Mac assumption) work unchanged. Injected even
+       for single-service projects.
+
+    All writes land in **each container's ephemeral /etc/hosts**, discarded on
+    removal — the macOS host's /etc/hosts is never read or written. Each line is
+    appended only if not already present (idempotent across re-runs). If a
+    container has no shell (e.g. distroless), its `exec` fails and that one
+    container is skipped with a warning rather than failing the whole `up`.
     """
-    addresses: list[tuple[str, str]] = []
+    # Resolve every container's address + gateway up front (one inspect each).
+    info: dict[str, tuple[str | None, str | None]] = {}
+    peers: list[tuple[str, str]] = []
     for service in services:
         name = service.container_name or f"{project.name}-{service.name}-1"
-        ip = _container_ipv4(name)
+        ip, gateway = _container_net(name)
+        info[name] = (ip, gateway)
         if ip:
-            addresses.append((service.name, ip))
+            peers.append((service.name, ip))
 
-    if len(addresses) < 2:
-        return  # nothing to resolve between
+    peer_lines = [f"{ip} {svc}" for svc, ip in peers] if len(peers) >= 2 else []
 
-    lines = [f"{ip} {svc}" for svc, ip in addresses]
-    printf_args = " ".join(shlex.quote(line) for line in lines)
-    script = f'printf "%s\\n" {printf_args} >> /etc/hosts'
     for service in services:
         name = service.container_name or f"{project.name}-{service.name}-1"
-        _run_container_capture(["exec", name, "sh", "-c", script])
+        _ip, gateway = info[name]
+        lines = list(peer_lines)
+        if gateway:
+            lines.append(f"{gateway} {_HOST_ALIASES}")
+        if not lines:
+            continue
+        # Append each line only if an identical one isn't already there, so a
+        # re-`up` (or any re-injection) never duplicates entries.
+        script = "\n".join(
+            f"grep -qxF {q} /etc/hosts || printf '%s\\n' {q} >> /etc/hosts"
+            for q in (shlex.quote(line) for line in lines)
+        )
+        result = _run_container_capture(["exec", name, "sh", "-c", script])
+        if result.returncode != 0:
+            _warn(
+                f"could not set host.docker.internal in {name} "
+                "(no shell in image?) — host-gateway name unavailable there"
+            )
 
 
 # ========================================================================== #
@@ -995,7 +1045,7 @@ def cmd_up(project: Project, *, detach: bool, build: bool, only: list[str], no_b
             return result.returncode
         started.append(service)
 
-    _inject_peer_hostnames(project, started)
+    _inject_etc_hosts(project, started)
 
     if detach:
         return 0
