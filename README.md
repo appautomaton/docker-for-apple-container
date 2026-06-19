@@ -72,6 +72,9 @@ of pretending to work.
 - `docker restart [-t N] CONTAINER...` — composed from `stop` + `start` (Apple
   has no `restart`); no state is kept between the two calls.
 - `docker export [-o FILE] CONTAINER` — maps onto `container export -o`.
+  Note: Apple `container export` requires the container to be **stopped**
+  (Docker also exports running ones); the shim surfaces Apple's "container
+  is not stopped" error rather than silently stopping it for you.
 - `docker login [-u USER] [--password-stdin] SERVER` / `docker logout SERVER` —
   delegate to `container registry login/logout`. **Apple stores the
   credential; the shim keeps nothing.** Docker `-p/--password` is refused in
