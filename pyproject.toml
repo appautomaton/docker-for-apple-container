@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
 name = "docker-for-apple-container"
-version = "0.1.2"
+dynamic = ["version"]
 description = "Docker CLI compatibility shim over Apple's container CLI."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -26,6 +26,12 @@ docker = "container_docker_shim.cli:main"
 [project.urls]
 Homepage = "https://github.com/appautomaton/docker-for-apple-container"
 Repository = "https://github.com/appautomaton/docker-for-apple-container"
+
+# Version is derived from the latest git tag (e.g. v0.1.3) by hatch-vcs.
+# There is no version string to bump in any file; tag a release and it flows
+# to the wheel, the package metadata, and (via CI) the website.
+[tool.hatch.version]
+source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/container_docker_shim"]

@@ -1,0 +1,66 @@
+name: Deploy site to Pages
+
+# Builds and deploys docs/ to GitHub Pages. The version and "updated" date are
+# stamped into the page at deploy time from the latest git tag, so nothing is
+# hardwired. Runs on content changes to main and again on each release (a new
+# tag) so the published version stays current.
+#
+# One-time setup: Settings > Pages > Source must be set to "GitHub Actions".
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "scripts/stamp_site.py"
+      - ".github/workflows/pages.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let an in-progress deploy finish; never cancel a Pages deployment midway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need tags to resolve the version
+
+      - name: Resolve version and date
+        id: meta
+        run: |
+          version="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+          version="${version#v}"
+          if [ -z "$version" ]; then
+            echo "::warning::no v* tag found; falling back to 0.1.2"
+            version="0.1.2"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Stamp version into the site
+        run: python3 scripts/stamp_site.py "${{ steps.meta.outputs.version }}" "${{ steps.meta.outputs.date }}"
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
