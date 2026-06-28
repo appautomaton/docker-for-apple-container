@@ -1,0 +1,233 @@
+/* base.css — reset, typography, 8px grid, motion guards */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+* { margin: 0; padding: 0; }
+
+html {
+  font-size: 100%;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media screen and (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+}
+
+body {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.6;
+  font-weight: 400;
+  color: var(--text);
+  background-color: var(--surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1, 'ss01' 1;
+  text-rendering: optimizeLegibility;
+  min-height: 100vh;
+  transition:
+    background-color var(--dur-base) var(--ease-soft),
+    color var(--dur-base) var(--ease-soft);
+}
+
+/* Readable measure */
+p { max-width: 65ch; }
+p + p { margin-top: var(--space-2); }
+p + h2, p + h3 { margin-top: var(--space-6); }
+
+/* ── Headings ─────────────────────────────────────────── */
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--text);
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: var(--text-3xl);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+h2 {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  margin-top: var(--space-10);
+}
+
+/* Question-form H2: GEO target */
+h2.is-question {
+  scroll-margin-top: var(--space-12);
+}
+
+h3 {
+  font-size: var(--text-lg);
+  font-weight: 500;
+  margin-top: var(--space-5);
+}
+
+/* ── Inline elements ──────────────────────────────────── */
+a {
+  color: var(--accent-strong);
+  text-decoration: none;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+a:hover { text-decoration: underline; color: var(--accent); }
+
+strong, b { font-weight: 600; color: var(--text); }
+em, i { font-style: italic; }
+
+code, kbd, samp {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  background: var(--code-bg);
+  color: var(--code-text);
+  padding: 0.15em 0.4em;
+  border-radius: var(--radius-sm);
+  font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 0;
+  -webkit-font-smoothing: auto;
+}
+
+/* ── Lists ───────────────────────────────────────────── */
+ul, ol {
+  margin: var(--space-2) 0 var(--space-3);
+  padding-left: 1.5em;
+}
+li { margin: var(--space-1) 0; }
+li > code { font-size: 0.85em; }
+
+/* ── Tables ──────────────────────────────────────────── */
+table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+th, td { padding: var(--space-2) var(--space-3); text-align: left; vertical-align: top; }
+th {
+  font-family: var(--font-display);
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-strong);
+}
+td { border-bottom: 1px solid var(--border); }
+td code { background: transparent; padding: 0; }
+
+/* ── Block-level / quotes ────────────────────────────── */
+blockquote {
+  margin: var(--space-4) 0;
+  padding: var(--space-2) var(--space-4);
+  border-left: 3px solid var(--accent);
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+hr {
+  border: 0;
+  margin: var(--space-8) 0;
+  height: 1px;
+  background: var(--border);
+}
+
+/* ── Selection ──────────────────────────────────────── */
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* ── Skip link — accessibility ───────────────────────── */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-raised);
+  color: var(--text);
+  border-radius: 0 0 var(--radius-sm) 0;
+  z-index: 100;
+}
+.skip-link:focus {
+  position: fixed;
+  left: var(--space-3);
+  top: var(--space-3);
+}
+
+/* ── Focus ring (HIG: visible on every interactive element) ── */
+:focus-visible {
+  outline: 2.5px solid var(--accent-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Code blocks (lead by example) ───────────────────── */
+pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  background: var(--code-bg);
+  color: var(--code-text);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  line-height: 1.5;
+  margin: var(--space-3) 0;
+  font-feature-settings: 'kern' 1, 'liga' 0, 'calt' 0;
+}
+pre code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* Subtle syntax tinting via class hooks (manual tokens; no Prism dep) */
+.tok-cmd { color: var(--code-accent); }
+.tok-flag { color: var(--accent-strong); }
+.tok-comment { color: var(--code-comment); font-style: italic; }
+.tok-prompt { color: var(--text-muted); user-select: none; }
+.tok-output { color: var(--text-muted); }
+
+/* ── Motion utility ─────────────────────────────────── */
+.reveal {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.reveal.is-in {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--dur-slow) var(--ease-out),
+    transform var(--dur-slow) var(--ease-out);
+}
+
+/* kiedyJS reveals: only when motion OK */
+@media (prefers-reduced-motion: no-preference) {
+  .reveal.is-in {
+    transition-duration: var(--dur-slow);
+  }
+  .reveal:nth-child(2).is-in { transition-delay: 60ms; }
+  .reveal:nth-child(3).is-in { transition-delay: 120ms; }
+  .reveal:nth-child(4).is-in { transition-delay: 180ms; }
+  .reveal:nth-child(5).is-in { transition-delay: 240ms; }
+}
+
+/* When motion reduced: snap visible */
+@media (prefers-reduced-motion: reduce) {
+  .reveal { opacity: 1; transform: none; }
+}
+
+/* ── Icons (lucide-static font via CDN) ─────────────── */
+[class^="icon-"], [class*=" icon-"] {
+  font-family: "lucide";
+  font-style: normal;
+  font-size: inherit;
+  line-height: 1;
+  vertical-align: -0.15em;
+  speak: never;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+[aria-hidden="true"][class^="icon-"],
+[aria-hidden="true"][class*=" icon-"] { color: inherit; }

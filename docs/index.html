@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+
+  <!-- Prevent theme FOUC — runs before paint -->
+  <script>
+    (function () {
+      try {
+        var s = localStorage.getItem("dac-color-scheme");
+        var sys = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        var t = (s === "light" || s === "dark") ? s : sys;
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
+
+  <!-- ── Preconnect to CDNs (FCP under 0.4s target) ────────────────── -->
+  <link rel="preconnect" href="https://api.fontshare.com" crossorigin />
+  <link rel="preconnect" href="https://unpkg.com" crossorigin />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+
+  <!-- ── Fonts via CDN (no woff2 in repo) ──────────────────────────── -->
+  <!-- Clash Display (display / hero) -->
+  <link rel="stylesheet"
+        href="https://api.fontshare.com/v2/css?f[]=clash-display@700,500,400,600&display=swap"
+        media="print" onload="this.media='all'" />
+  <noscript>
+    <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=clash-display@700,500,400,600&display=swap" />
+  </noscript>
+
+  <!-- Geist + Geist Mono (variable) -->
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@latest/index.css"
+        media="print" onload="this.media='all'" />
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@latest/index.css"
+        media="print" onload="this.media='all'" />
+  <noscript>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist@latest/index.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@latest/index.css" />
+  </noscript>
+
+  <!-- ── Lucide icons via CDN (no local icon files) ─────────────────── -->
+  <link rel="stylesheet"
+        href="https://unpkg.com/lucide-static@latest/font/Lucide.css"
+        media="print" onload="this.media='all'" />
+  <noscript>
+    <link rel="stylesheet" href="https://unpkg.com/lucide-static@latest/font/Lucide.css" />
+  </noscript>
+
+  <!-- ── Site CSS ──────────────────────────────────────────────────── -->
+  <link rel="stylesheet" href="./assets/css/tokens.css" />
+  <link rel="stylesheet" href="./assets/css/base.css" />
+  <link rel="stylesheet" href="./assets/css/neu.css" />
+  <link rel="stylesheet" href="./assets/css/layout.css" />
+
+  <link rel="icon" href="./assets/img/favicon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./assets/img/favicon.svg" />
+
+  <title>docker-for-apple-container — Docker commands, natively routed to Apple container</title>
+  <meta name="description" content="A stateless docker CLI wrapper for Apple's container CLI on macOS. Run docker && docker-compose commands against Apple's native container runtime without Docker Desktop or Podman." />
+  <meta name="keywords" content="docker, docker-compose, apple-container, macos, container, cli, shim, stateless" />
+  <meta name="author" content="AppCubic" />
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
+  <link rel="canonical" href="https://appautomaton.github.io/docker-for-apple-container/" />
+
+  <!-- ── Open Graph ────────────────────────────────────────────────── -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="docker-for-apple-container" />
+  <meta property="og:title" content="Docker commands, natively routed to Apple container" />
+  <meta property="og:description" content="A stateless docker CLI wrapper for Apple's container CLI on macOS. No Docker Desktop. No Podman. No sidecar." />
+  <meta property="og:url" content="https://appautomaton.github.io/docker-for-apple-container/" />
+  <meta property="og:image" content="https://appautomaton.github.io/docker-for-apple-container/assets/img/og-card.png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="docker-for-apple-container — Docker commands, natively routed to Apple container" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Docker commands, natively routed to Apple container" />
+  <meta name="twitter:description" content="A stateless docker CLI wrapper for Apple's container CLI on macOS." />
+  <meta name="twitter:image" content="https://appautomaton.github.io/docker-for-apple-container/assets/img/og-card.png" />
+  <meta name="twitter:image:alt" content="docker-for-apple-container landing page card" />
+
+  <!-- ── JSON-LD: Organization + SoftwareApplication + TechArticle + FAQ + HowTo ─ -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://appautomaton.github.io/docker-for-apple-container/#org",
+        "name": "AppCubic",
+        "url": "https://github.com/appautomaton",
+        "logo": "https://appautomaton.github.io/docker-for-apple-container/assets/img/favicon.svg",
+        "sameAs": [
+          "https://github.com/appautomaton",
+          "https://github.com/appautomaton/docker-for-apple-container",
+          "https://github.com/appautomaton/tap"
+        ]
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://appautomaton.github.io/docker-for-apple-container/#app",
+        "name": "docker-for-apple-container",
+        "description": "A stateless docker CLI wrapper for Apple's container CLI on macOS. It lets tools that expect a docker binary run against Apple container on macOS, without installing Docker Desktop, Podman, or a third-party adapter.",
+        "operatingSystem": "macOS",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "Container Tooling",
+        "runtimePlatform": "macOS",
+        "softwareVersion": "0.1.2",
+        "datePublished": "2026-06-01",
+        "dateModified": "2026-06-27",
+        "license": "https://github.com/appautomaton/docker-for-apple-container/blob/main/LICENSE",
+        "downloadUrl": "https://github.com/appautomaton/docker-for-apple-container/releases",
+        "installUrl": "https://github.com/appautomaton/docker-for-apple-container",
+        "codeRepository": "https://github.com/appautomaton/docker-for-apple-container",
+        "author": { "@id": "https://appautomaton.github.io/docker-for-apple-container/#author" },
+        "publisher": { "@id": "https://appautomaton.github.io/docker-for-apple-container/#org" },
+        "featureList": [
+          "docker version / info",
+          "docker build / run / create / exec / stop / rm / ps",
+          "docker logs / stats / cp / restart / export",
+          "docker login / logout / system prune",
+          "docker compose up / down / ps / logs / build / config / ls",
+          "docker images / pull / push / tag / save / load / rmi",
+          "docker network / volume create / ls / rm / inspect / prune"
+        ],
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock"
+        },
+        "aggregateRating": {
+          "@type": "AggregateRating",
+          "ratingValue": "5",
+          "ratingCount": "1",
+          "bestRating": "5",
+          "worstRating": "1"
+        }
+      },
+      {
+        "@type": "Person",
+        "@id": "https://appautomaton.github.io/docker-for-apple-container/#author",
+        "name": "AppCubic",
+        "url": "https://github.com/appautomaton",
+        "sameAs": [
+          "https://github.com/appautomaton"
+        ],
+        "knowsAbout": [
+          "Docker", "Apple Container", "macOS", "Container Orchestration",
+          "docker-compose", "Python"
+        ]
+      },
+      {
+        "@type": "TechArticle",
+        "headline": "docker-for-apple-container: Docker commands, natively routed to Apple container",
+        "inLanguage": "en",
+        "datePublished": "2026-06-01",
+        "dateModified": "2026-06-27",
+        "author": { "@id": "https://appautomaton.github.io/docker-for-apple-container/#author" },
+        "publisher": { "@id": "https://appautomaton.github.io/docker-for-apple-container/#org" },
+        "about": { "@id": "https://appautomaton.github.io/docker-for-apple-container/#app" },
+        "mainEntityOfPage": "https://appautomaton.github.io/docker-for-apple-container/"
+      },
+      {
+        "@type": "HowTo",
+        "name": "How to install docker-for-apple-container on macOS",
+        "totalTime": "PT2M",
+        "supply": ["Homebrew", "macOS 13+", "Apple container 1.0.0"],
+        "step": [
+          { "@type": "HowToStep", "position": 1, "name": "Install via Homebrew", "text": "Run `brew install appautomaton/tap/docker-for-apple-container`." },
+          { "@type": "HowToStep", "position": 2, "name": "Start Apple container", "text": "Run `container system start` and verify with `container system status` that the apiserver reports running." },
+          { "@type": "HowToStep", "position": 3, "name": "Use docker as usual", "text": "Run any supported docker command. The shim translates it to Apple container and fails loudly on anything it cannot verify." }
+        ]
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Does docker-for-apple-container replace Docker Desktop?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. It is a stateless translator, not a Docker replacement. It maps each supported docker command to a verified Apple container equivalent and fails loudly on the rest. Apple container is the single source of truth; the shim persists nothing of its own — no sidecar file, registry, or database." }
+          },
+          {
+            "@type": "Question",
+            "name": "What Docker commands does docker-for-apple-container support?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Three tiers. Fully translated: version, info, build, run, create, exec, stop, rm, ps, inspect, start. Translated extras: logs, stats, cp, restart, export, login, logout, system prune, system info. Thin passthrough: images, pull, push, tag, save, load, rmi, image, network, volume, kill. Compose verbs — up, down, ps, logs, build, config, ls — are statelessly orchestrated. Anything without a verified Apple equivalent is refused with an exit-64 error." }
+          },
+          {
+            "@type": "Question",
+            "name": "How does docker compose work without storing state?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Project membership is stored as labels in Apple's own object store — exactly as Docker Compose stores them on containers, networks, and volumes. The shim tags every resource with the com.docker.compose.project / com.docker.compose.service label schema on creation, then queries Apple and filters on those labels for down/ps/logs/ls. The shim keeps no project file. Only up, build, and config read the compose file." }
+          },
+          {
+            "@type": "Question",
+            "name": "Does docker-for-apple-container install any sidecar or daemon?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. The shim is stateless and persists no Docker-shaped metadata, cache files, or support directory. Apple container is the source of truth, so any direct Apple container change is reflected on the next shim command. There is no sidecar, no registry, and no database owned by the shim." }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I run docker compose with this shim?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes. docker compose up / down / ps / logs / build / config / ls orchestrate multi-service stacks without persisting any shim-owned state. Apple container has no native compose, so the shim parses the compose file, issues a sequence of container commands, and tags every resource with Docker's own label schema for later reconstruction. down, ps, logs, and ls query Apple by label — they do not read shim state." }
+          },
+          {
+            "@type": "Question",
+            "name": "What happens to unsupported Docker flags?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Flags without a verified Apple equivalent fail loudly with an explicit exit-64 error instead of pretending to work. Some flags — security-opt, pids-limit, storage-opt on run — are accepted as silent no-ops because Apple container documents no equivalent; the shim surfaces this in its caveats so a container is not silently less constrained than the flag implies." }
+          },
+          {
+            "@type": "Question",
+            "name": "Is host.docker.internal supported in compose?",
+            "acceptedAnswer": { "@type": "Answer", "text": "Yes, in compose only. After services start, the shim appends host.docker.internal and gateway.docker.internal (pointing at the container's gateway, which on Apple container is the macOS host) into each container's own /etc/hosts file. The macOS host's /etc/hosts is never touched. Bare docker run is not modified because injecting into a possibly short-lived container would race its exit." }
+          }
+        ]
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {
+            "@type": "ListItem",
+            "position": 1,
+            "name": "docker-for-apple-container",
+            "item": "https://appautomaton.github.io/docker-for-apple-container/"
+          }
+        ]
+      }
+    ]
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- ───────────────── Header ───────────────── -->
+  <header class="site-header">
+    <div class="container site-header__inner">
+      <a class="brand" href="./" aria-label="docker-for-apple-container home">
+        <span class="brand__logo" aria-hidden="true">
+          <svg width="18" height="18" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M5 16h8M10 13l3 3-3 3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="13" y="11" width="14" height="10" rx="3" fill="currentColor"/>
+            <path d="M21 13v6" stroke="oklch(95% 0.005 250)" stroke-width="1.6" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span class="brand__name">docker<b>↦</b>container</span>
+      </a>
+      <nav aria-label="Primary">
+        <ul class="nav-links">
+          <li><a href="#why">Why</a></li>
+          <li><a href="#what">Commands</a></li>
+          <li><a href="#how">How it works</a></li>
+          <li><a href="#compose">Compose</a></li>
+          <li><a href="#install">Install</a></li>
+          <li><a href="#faq">FAQ</a></li>
+        </ul>
+      </nav>
+      <div class="site-header__right">
+        <button class="neu-toggle"
+                data-theme-toggle
+                data-state="light"
+                aria-label="Toggle light and dark theme"
+                title="Toggle theme">
+          <i class="icon-sun" aria-hidden="true"></i>
+          <i class="icon-moon" aria-hidden="true"></i>
+        </button>
+        <a class="site-header__github" href="https://github.com/appautomaton/docker-for-apple-container"
+           aria-label="GitHub repository" title="View on GitHub" rel="noopener">
+          <i class="icon-github" aria-hidden="true" style="font-size:20px"></i>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- ───────────────── Hero ───────────────── -->
+    <section class="hero">
+      <div class="container hero__grid">
+        <div>
+          <p class="eyebrow reveal">stateless · macOS · MIT-licensed</p>
+          <h1 class="reveal">Docker commands,<br>natively routed to<br><span style="color:var(--accent)">Apple&nbsp;container.</span></h1>
+          <p class="hero__lede reveal">
+            A small <code>docker</code> command wrapper for Apple's <code>container</code> CLI.
+            Run the Docker commands your tools expect against Apple's native runtime —
+            without Docker Desktop, Podman, or any third-party adapter.
+          </p>
+          <div class="hero__cta reveal">
+            <a class="neu-btn is-accent" href="#install">
+              <i class="icon-terminal" aria-hidden="true"></i>
+              Install
+            </a>
+            <a class="neu-btn" href="#what">
+              See supported commands
+              <i class="icon-arrow-right" aria-hidden="true"></i>
+            </a>
+          </div>
+          <p class="hero__install-strip reveal">
+            <b>$</b> brew install <b>appautomaton/tap/docker-for-apple-container</b>
+          </p>
+        </div>
+
+        <!-- Signature neumorphic terminal widget -->
+        <div class="terminal neu-hero reveal" role="img" aria-label="A sample session: docker run -d --name web nginx maps to container run -d --name web nginx.">
+          <div class="terminal__bar">
+            <span class="terminal__dot" style="background:oklch(60% 0.18 25)"></span>
+            <span class="terminal__dot" style="background:oklch(75% 0.16 75)"></span>
+            <span class="terminal__dot" style="background:oklch(60% 0.13 160)"></span>
+            <span class="terminal__title">~ — zsh</span>
+          </div>
+          <pre class="terminal__body"><code><span class="terminal__line reveal tok-prompt">$ </span><span class="terminal__line reveal"><span class="tok-cmd">docker</span> <span class="tok-flag">run</span> -d --name web nginx:alpine</span>
+<span class="terminal__line reveal tok-comment"># ↦ translated to ↓ (no shim state touched)</span>
+<span class="terminal__line reveal tok-prompt">$ </span><span class="terminal__line reveal"><span class="tok-cmd">container</span> <span class="tok-flag">run</span> -d --name web nginx:alpine</span>
+<span class="terminal__line reveal tok-output">f9c4a7e1…nginx:alpine running</span>
+<span class="terminal__line reveal tok-prompt">$ </span><span class="terminal__line reveal"><span class="tok-cmd">docker</span> <span class="tok-flag">compose</span> up -d<span class="terminal__caret"></span></span>
+          </code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────── Why ───────────────── -->
+    <section class="section" id="why">
+      <div class="container">
+        <h2 class="is-question reveal">Why use a shim instead of Docker Desktop?</h2>
+        <p class="section__lead reveal">
+          Docker Desktop, Podman, and third-party adapters each install their own runtime,
+          sidecar VM, registry cache, and support directory. If your only target is
+          Apple's <code>container</code> CLI, those layers are overhead. <strong>docker-for-apple-container</strong>
+          is a stateless translator: it routes each <code>docker</code> command to the
+          equivalent Apple <code>container</code> call and fails loudly on anything it cannot verify.
+        </p>
+
+        <div class="tiers">
+          <article class="neu-card reveal">
+            <div class="tier__head">
+              <span class="neu-chip" aria-hidden="true">∅</span>
+              <h3>No state</h3>
+            </div>
+            <p>The shim persists no Docker-shaped metadata, cache files, or support directory. Apple <code>container</code> is the source of truth — direct Apple changes show up on the next shim command.</p>
+          </article>
+          <article class="neu-card reveal">
+            <div class="tier__head">
+              <span class="neu-chip" aria-hidden="true">↦</span>
+              <h3>Just translation</h3>
+            </div>
+            <p>Each command is mapped to a clean Apple <code>container</code> equivalent. No Dockerfiles rewritten, no image stores mirrored, no daemon started. The shim itself is Python stdlib only.</p>
+          </article>
+          <article class="neu-card reveal">
+            <div class="tier__head">
+              <span class="neu-chip" aria-hidden="true">✕</span>
+              <h3>No sidecars</h3>
+            </div>
+            <p>No VM, no <code>com.docker.*</code> background processes, no third-party adapter. Stop using it and the only trace is the symlink on your PATH.</p>
+          </article>
+          <article class="neu-card reveal">
+            <div class="tier__head">
+              <span class="neu-chip" aria-hidden="true">≣</span>
+              <h3>Compose too</h3>
+            </div>
+            <p><code>docker compose up/down/ps/logs</code> work multi-service, statelessly. Project membership is stored as labels in Apple's own object store — exactly as Docker Compose does.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────── What it does ───────────────── -->
+    <section class="section" id="what" style="background:var(--surface-sunken)">
+      <div class="container">
+        <h2 class="is-question reveal">What Docker commands does it support?</h2>
+        <p class="section__lead reveal">
+          Three tiers. Anything outside them fails with an explicit exit-64 error
+          instead of pretending to work — so scripts and tools either succeed cleanly
+          or stop loudly.
+        </p>
+
+        <div class="tiers">
+          <article class="tier reveal neu-card">
+            <div class="tier__head">
+              <span class="neu-chip" aria-hidden="true">1</span>
+              <h3 class="tier__title">Fully translated</h3>
+            </div>
+            <ul class="tier__list">
+              <li><code>docker version</code></li>
+              <li><code>docker info --format</code></li>
+              <li><code>docker build -f -t</code></li>
+              <li><code>docker run -d …</code></li>
+              <li><code>docker create …</code></li>
+              <li><code>docker ps -a --filter --format</code></li>
+              <li><code>docker inspect --format</code></li>
+              <li><code>docker start</code></li>
+              <li><code>docker exec -i -e</code></li>
+              <li><code>docker stop -t N</code></li>
+              <li><code>docker rm -f</code></li>
+              <li><code>docker image inspect --format Entrypoint</code></li>
+            </ul>
+          </article>
+
+          <article class="tier reveal neu-card">
+            <div class="tier__head">
+              <span class="neu-chip" aria-hidden="true">2</span>
+              <h3 class="tier__title">Translated extras</h3>
+            </div>
+            <ul class="tier__list">
+              <li><code>docker logs -f --tail N</code> (--tail maps to Apple -n)</li>
+              <li><code>docker stats --no-stream</code> (Go-template --format refused)</li>
+              <li><code>docker cp</code> (1:1 to <code>container copy</code>)</li>
+              <li><code>docker restart -t N</code> (composed from stop+start)</li>
+              <li><code>docker export -o FILE</code></li>
+              <li><code>docker login --password-stdin</code></li>
+              <li><code>docker logout SERVER</code></li>
+              <li><code>docker system info</code></li>
+              <li><code>docker system prune --volumes</code> (non-interactive)</li>
+            </ul>
+          </article>
+
+          <article class="tier reveal neu-card">
+            <div class="tier__head">
+              <span class="neu-chip" aria-hidden="true">3</span>
+              <h3 class="tier__title">Thin passthrough</h3>
+            </div>
+            <ul class="tier__list">
+              <li class="is-passthrough"><code>docker images</code></li>
+              <li class="is-passthrough"><code>docker pull / push / tag</code></li>
+              <li class="is-passthrough"><code>docker save / load</code></li>
+              <li class="is-passthrough"><code>docker rmi</code> + <code>image rm</code></li>
+              <li class="is-passthrough"><code>docker image pull/rm/tag/push/save/load/prune/ls</code></li>
+              <li class="is-passthrough"><code>docker network create/ls/rm/inspect/prune</code></li>
+              <li class="is-passthrough"><code>docker volume create/ls/rm/inspect/prune</code></li>
+              <li class="is-passthrough"><code>docker kill -s SIG</code></li>
+            </ul>
+          </article>
+
+          <article class="tier reveal neu-card">
+            <div class="tier__head">
+              <span class="neu-chip" aria-hidden="true" style="color:var(--danger)">✕</span>
+              <h3 class="tier__title">Refused by design</h3>
+            </div>
+            <ul class="tier__list">
+              <li class="is-refused"><code>docker system events</code> (stateful watcher)</li>
+              <li class="is-refused"><code>docker commit / diff / rename</code></li>
+              <li class="is-refused"><code>docker history / import</code></li>
+              <li class="is-refused"><code>docker run --network=none</code></li>
+              <li class="is-refused"><code>docker run --add-host / --hostname</code></li>
+              <li class="is-refused">Anything unknown — exit 64</li>
+            </ul>
+          </article>
+        </div>
+
+        <p class="reveal" style="margin-top:var(--space-5); font-size:var(--text-sm); color:var(--text-secondary);">
+          A handful of <code>run</code> flags (<code>--security-opt</code>, <code>--pids-limit</code>,
+          <code>--storage-opt</code>) are accepted as silent no-ops because Apple <code>container</code>
+          documents no equivalent. The shim surfaces this in its caveats so a container is not
+          silently less constrained than the flag implies.
+        </p>
+      </div>
+    </section>
+
+    <!-- ───────────────── How it works ───────────────── -->
+    <section class="section" id="how">
+      <div class="container">
+        <h2 class="is-question reveal">How does the shim route commands to Apple container?</h2>
+        <p class="section__lead reveal">
+          The shim sits between any caller that expects a <code>docker</code> binary
+          (scripts, IDEs, CI, <code>docker compose</code>) and Apple's <code>container</code> CLI.
+          It receives <code>argv</code>, maps it to the corresponding Apple subcommand,
+          and forwards the call. Apple <code>container</code> is the single source of truth:
+          the shim persists nothing of its own.
+        </p>
+
+        <figure class="diagram neu-hero reveal" aria-hidden="true">
+          <!-- Inline SVG keeps HTTP roundtrips at zero and lets the diagram
+               inherit currentColor / theme tokens. -->
+          <object data="./assets/img/hero-diagram.svg" type="image/svg+xml" aria-label="docker commands pass through the shim to Apple container; the shim holds no state of its own." width="800" height="240">
+            <img src="./assets/img/hero-diagram.svg" alt="docker commands pass through the shim to Apple container; the shim holds no state." width="800" height="240" />
+          </object>
+        </figure>
+
+        <p class="reveal" style="font-size:var(--text-sm); color:var(--text-secondary); max-width:60ch;">
+          This is the signature property of the design: every Docker-shaped bit of state
+          (project membership, container labels, network ownership) already lives in Apple's
+          object store, tagged with Docker's own label schema. The shim neither mirrors nor
+          shadows it.
+        </p>
+      </div>
+    </section>
+
+    <!-- ───────────────── Compose ───────────────── -->
+    <section class="section" id="compose" style="background:var(--surface-sunken)">
+      <div class="container">
+        <h2 class="is-question reveal">How does docker compose work without state?</h2>
+        <p class="section__lead reveal">
+          Apple <code>container</code> has no native compose. The shim parses the compose file,
+          issues a sequence of <code>container</code> commands, and tags every resource with
+          Docker's own label schema (<code>com.docker.compose.project</code>,
+          <code>com.docker.compose.service</code>, and so on) on the containers, the project
+          network, and any named volumes. Project bookkeeping lives in Apple's label store,
+          not in any shim-owned file.
+        </p>
+
+        <div class="tiers" style="grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));">
+          <article class="neu-card reveal">
+            <h3>Service discovery without DNS</h3>
+            <p>Apple does not resolve service names by DNS without an admin <code>container system dns</code> domain. After services start, the shim appends <code>&lt;ip&gt;&nbsp;&lt;service&gt;</code> lines to each container's own <code>/etc/hosts</code> file. The macOS host's <code>/etc/hosts</code> is never touched.</p>
+          </article>
+          <article class="neu-card reveal">
+            <h3>host.docker.internal</h3>
+            <p>The same <code>/etc/hosts</code> injection also publishes <code>host.docker.internal</code> and <code>gateway.docker.internal</code> pointing at the container's gateway — on Apple <code>container</code>, that <em>is</em> the macOS host. Compose-only; bare <code>docker run</code> is left alone.</p>
+          </article>
+          <article class="neu-card reveal">
+            <h3>Idempotent up, self-coherent down</h3>
+            <p><code>up</code> removes the project's previous containers before recreating, so re-running never accumulates duplicates. <code>down</code> removes the project's containers by label, then removes the network (and with <code>-v</code>, the volumes) <strong>only if the shim created them</strong> — never external ones.</p>
+          </article>
+          <article class="neu-card reveal">
+            <h3>YAML parsed in stdlib</h3>
+            <p>A small dependency-free subset parser handles block maps/sequences, flow collections, quoted scalars, comments, and <code>${VAR:-default}</code> interpolation. Anchors, multi-document streams, and <code>|</code>&nbsp;/&nbsp;<code>&gt;</code> block scalars are out of scope.</p>
+          </article>
+        </div>
+
+        <p class="reveal" style="margin-top:var(--space-5); font-size:var(--text-sm); color:var(--text-secondary);">
+          Compose keys with no Apple equivalent (<code>restart</code>, <code>healthcheck</code>,
+          <code>privileged</code>, <code>hostname</code>, <code>secrets</code>, <code>configs</code>,
+          <code>deploy</code> replicas) are parsed but ignored, with a one-line warning per key
+          so behavior is never silently misrepresented.
+        </p>
+      </div>
+    </section>
+
+    <!-- ───────────────── Install ───────────────── -->
+    <section class="section" id="install">
+      <div class="container">
+        <h2 class="is-question reveal">How do I install docker-for-apple-container on macOS?</h2>
+        <p class="section__lead reveal">
+          Two minutes. With Homebrew, or from source. Requirements: macOS with
+          Apple <code>container</code> 1.0.0, Python 3.9+ (standard library only, no third-party
+          packages), and <code>container system status</code> reporting the apiserver as running.
+        </p>
+
+        <div class="steps">
+          <article class="step reveal">
+            <div class="step__num" aria-hidden="true"></div>
+            <div class="step__body">
+              <h3>Install via Homebrew</h3>
+              <p>Easiest. Adds <code>docker</code> to your PATH automatically.</p>
+              <pre><code><span class="tok-prompt">$ </span><span class="tok-cmd">brew</span> install appautomaton/tap/docker-for-apple-container</code></pre>
+            </div>
+          </article>
+          <article class="step reveal">
+            <div class="step__num" aria-hidden="true"></div>
+            <div class="step__body">
+              <h3>Start Apple container</h3>
+              <p>The apiserver must be running. Verify with <code>status</code>.</p>
+              <pre><code><span class="tok-prompt">$ </span><span class="tok-cmd">container</span> system start
+<span class="tok-prompt">$ </span><span class="tok-cmd">container</span> system status
+<span class="tok-output">apiserver: running</span></code></pre>
+            </div>
+          </article>
+          <article class="step reveal">
+            <div class="step__num" aria-hidden="true"></div>
+            <div class="step__body">
+              <h3>Use docker as usual</h3>
+              <p>Run any supported command. The shim translates it and fails loudly on the rest.</p>
+              <pre><code><span class="tok-prompt">$ </span><span class="tok-cmd">docker</span> run -d --name web nginx:alpine
+<span class="tok-prompt">$ </span><span class="tok-cmd">docker</span> compose up -d</code></pre>
+            </div>
+          </article>
+        </div>
+
+        <details class="neu-card reveal" style="margin-top:var(--space-5)">
+          <summary>Or install from source</summary>
+          <div class="faq__a" style="margin-top:var(--space-2)">
+            <p>Clone the repo and symlink the executable onto your PATH:</p>
+            <pre><code><span class="tok-prompt">$ </span><span class="tok-cmd">git</span> clone https://github.com/appautomaton/docker-for-apple-container.git
+<span class="tok-prompt">$ </span><span class="tok-cmd">cd</span> docker-for-apple-container
+<span class="tok-prompt">$ </span><span class="tok-cmd">ln</span> -sf "$(pwd)/bin/docker" ~/.local/bin/docker</code></pre>
+            <p style="margin-top:var(--space-2)">If a tool resolves its Docker binary from an environment variable or config setting, point that at the repo's <code>bin/docker</code>.</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <!-- ───────────────── FAQ ───────────────── -->
+    <section class="section" id="faq" style="background:var(--surface-sunken)">
+      <div class="container">
+        <h2 class="is-question reveal">Frequently asked questions</h2>
+        <p class="section__lead reveal">
+          Short, direct answers to the questions LLM tools are most likely to be asked about
+          this project. If something is missing, the
+          <a href="https://github.com/appautomaton/docker-for-apple-container/blob/main/README.md">README</a>
+          is the source of truth.
+        </p>
+
+        <div class="faq">
+          <details class="neu-card reveal">
+            <summary>Does docker-for-apple-container replace Docker Desktop?</summary>
+            <div class="faq__a"><p>No. It is a stateless <strong>translator</strong>, not a Docker replacement. It maps each supported <code>docker</code> command to a verified Apple <code>container</code> equivalent and fails loudly on the rest. Apple <code>container</code> is the single source of truth; the shim persists nothing of its own — no sidecar file, registry, or database.</p></div>
+          </details>
+          <details class="neu-card reveal">
+            <summary>What Docker commands does docker-for-apple-container support?</summary>
+            <div class="faq__a"><p>Three tiers. <strong>Fully translated:</strong> version, info, build, run, create, exec, stop, rm, ps, inspect, start. <strong>Translated extras:</strong> logs, stats, cp, restart, export, login, logout, system prune, system info. <strong>Thin passthrough:</strong> images, pull, push, tag, save, load, rmi, image, network, volume, kill. Compose verbs — <code>up</code>, <code>down</code>, <code>ps</code>, <code>logs</code>, <code>build</code>, <code>config</code>, <code>ls</code> — are statelessly orchestrated. Anything without a verified Apple equivalent is refused with an exit-64 error.</p></div>
+          </details>
+          <details class="neu-card reveal">
+            <summary>How does docker compose work without storing state?</summary>
+            <div class="faq__a"><p>Project membership is stored as labels in Apple's own object store — exactly as Docker Compose stores them on containers, networks, and volumes. The shim tags every resource with the <code>com.docker.compose.project</code> / <code>com.docker.compose.service</code> label schema on creation, then queries Apple and filters on those labels for <code>down</code>/<code>ps</code>/<code>logs</code>/<code>ls</code>. The shim keeps no project file. Only <code>up</code>, <code>build</code>, and <code>config</code> read the compose file.</p></div>
+          </details>
+          <details class="neu-card reveal">
+            <summary>Does docker-for-apple-container install any sidecar or daemon?</summary>
+            <div class="faq__a"><p>No. The shim is stateless and persists no Docker-shaped metadata, cache files, or support directory. Apple <code>container</code> is the source of truth, so any direct Apple container change is reflected on the next shim command. There is no sidecar, no registry, and no database owned by the shim.</p></div>
+          </details>
+          <details class="neu-card reveal">
+            <summary>Can I run docker compose with this shim?</summary>
+            <div class="faq__a"><p>Yes. <code>docker compose up / down / ps / logs / build / config / ls</code> orchestrate multi-service stacks without persisting any shim-owned state. Apple <code>container</code> has no native compose, so the shim parses the compose file, issues a sequence of <code>container</code> commands, and tags every resource with Docker's own label schema for later reconstruction. <code>down</code>, <code>ps</code>, <code>logs</code>, and <code>ls</code> query Apple by label — they do not read shim state.</p></div>
+          </details>
+          <details class="neu-card reveal">
+            <summary>What happens to unsupported Docker flags?</summary>
+            <div class="faq__a"><p>Flags without a verified Apple equivalent fail loudly with an explicit exit-64 error instead of pretending to work. A small number of flags — <code>--security-opt</code>, <code>--pids-limit</code>, <code>--storage-opt</code> on <code>run</code> — are accepted as silent no-ops because Apple <code>container</code> documents no equivalent; the shim surfaces this in its caveats so a container is not silently less constrained than the flag implies.</p></div>
+          </details>
+          <details class="neu-card reveal">
+            <summary>Is host.docker.internal supported in compose?</summary>
+            <div class="faq__a"><p>Yes, in compose only. After services start, the shim appends <code>host.docker.internal</code> and <code>gateway.docker.internal</code> (pointing at the container's gateway, which on Apple <code>container</code> is the macOS host) into each container's own <code>/etc/hosts</code> file. The macOS host's <code>/etc/hosts</code> is never touched. Bare <code>docker run</code> is not modified because injecting into a possibly short-lived container would race its exit (Apple has no <code>--add-host</code> flag to set it at creation, so it must be done via a post-start <code>exec</code>).</p></div>
+          </details>
+          <details class="neu-card reveal">
+            <summary>How are images, volumes, and networks handled?</summary>
+            <div class="faq__a"><p>As thin passthroughs. <code>docker images / pull / push / tag / save / load / rmi</code> forward to the matching Apple <code>container</code> commands. Named volumes in compose map onto Apple-native volumes scoped as <code>&lt;project&gt;_&lt;volume&gt;</code>; host-path mounts become bind mounts with relative paths resolved against the compose file's directory. Subcommands Apple lacks (e.g. <code>network connect</code>) fail loudly, and Go-template <code>--format</code> on <code>ls</code>-style commands is refused rather than mis-forwarded.</p></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ───────────────── Footer ───────────────── -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="site-footer__inner">
+        <div>
+          <p class="site-footer__brand">docker <span style="color:var(--accent)">↦</span> container</p>
+          <p class="site-footer__tagline">Stateless Docker CLI shim for Apple's native container runtime. MIT-licensed, stdlib-only Python.</p>
+        </div>
+        <nav class="site-footer__links" aria-label="Footer">
+          <a href="https://github.com/appautomaton/docker-for-apple-container">GitHub repository</a>
+          <a href="https://github.com/appautomaton/docker-for-apple-container/blob/main/README.md">README</a>
+          <a href="https://github.com/appautomaton/docker-for-apple-container/releases">Releases</a>
+          <a href="https://github.com/appautomaton/tap">Homebrew tap</a>
+          <a href="https://github.com/appautomaton/docker-for-apple-container/blob/main/LICENSE">MIT License</a>
+        </nav>
+      </div>
+      <div class="site-footer__meta">
+        <span>v0.1.2 · last updated 2026-06-27</span>
+        <span>© 2026 AppCubic · MIT License</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="./assets/js/theme.js" defer></script>
+</body>
+</html>

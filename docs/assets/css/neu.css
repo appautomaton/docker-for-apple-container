@@ -1,0 +1,244 @@
+/* neu.css — neumorphic primitives with HIG-safe focus rings
+ *
+ * Neumorphism done right:
+ *  - Signature accents only (hero widget, install card, tier cards)
+ *  - Two paired shadows on a unified surface color
+ *  - Visible focus rings preserved (the #1 neumorphism a11y failure)
+ *  - Hierarchy by size > weight before shadow; never rely on shadow alone
+ *  - Honors prefers-reduced-motion
+ */
+
+.neu-raised {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    -6px -6px 14px var(--neu-hi),
+     6px  6px 14px var(--neu-lo);
+  /* No border — purity is the point; relies on shadow contrast */
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+
+.neu-raised.is-pressable:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    -8px -8px 18px var(--neu-hi),
+     8px  8px 18px var(--neu-lo);
+}
+.neu-raised.is-pressable:active {
+  transform: translateY(0.5px);
+  box-shadow:
+    -4px -4px 10px var(--neu-hi),
+     4px  4px 10px var(--neu-lo);
+}
+
+/* Pressed / sunken surface (e.g. active toggle, code recess) */
+.neu-pressed {
+  background: var(--surface-pressed);
+  border-radius: var(--radius-md);
+  box-shadow:
+    inset -4px -4px 8px var(--neu-hi),
+    inset  4px  4px 8px var(--neu-lo);
+}
+
+/* The signature hero terminal card: larger shadow, more breath */
+.neu-hero {
+  background: var(--surface);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    -12px -12px 28px var(--neu-hi),
+     12px  12px 28px var(--neu-lo);
+}
+
+/* On hover, a connected neumorphic card with internal press reveal */
+.neu-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow:
+    -6px -6px 14px var(--neu-hi),
+     6px  6px 14px var(--neu-lo);
+  padding: var(--space-4);
+  position: relative;
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+.neu-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    -9px -9px 20px var(--neu-hi),
+     9px  9px 20px var(--neu-lo);
+}
+.neu-card h3 {
+  font-size: var(--text-md);
+  margin-bottom: var(--space-2);
+  margin-top: 0;
+}
+.neu-card p {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+/* Neumorphic pill button */
+.neu-btn {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: var(--text-base);
+  letter-spacing: -0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  min-height: var(--touch-min);
+  min-width: var(--touch-min);
+  box-shadow:
+    -4px -4px 10px var(--neu-hi),
+     4px  4px 10px var(--neu-lo);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    box-shadow var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
+}
+.neu-btn:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    -6px -6px 14px var(--neu-hi),
+     6px  6px 14px var(--neu-lo);
+}
+.neu-btn:active {
+  transform: translateY(0.5px);
+  box-shadow:
+    inset -3px -3px 7px var(--neu-hi),
+    inset  3px  3px 7px var(--neu-lo);
+  color: var(--text-secondary);
+}
+
+/* Accent-filled variant for primary CTA */
+.neu-btn.is-accent {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  box-shadow:
+    -4px -4px 10px var(--neu-hi),
+     6px  6px 14px oklch(40% 0.13 180 / 0.35);
+}
+.neu-btn.is-accent:hover {
+  color: var(--text-on-accent);
+  background: var(--accent-strong);
+  transform: translateY(-1px);
+}
+.neu-btn.is-accent:active {
+  background: var(--accent);
+  box-shadow:
+    inset -3px -3px 7px oklch(80% 0.13 180),
+    inset  3px  3px 7px oklch(45% 0.14 180);
+}
+
+/* Neumorphic toggle — used by theme switch */
+.neu-toggle {
+  width: 56px;
+  height: 32px;
+  border-radius: var(--radius-full);
+  background: var(--surface);
+  border: 0;
+  cursor: pointer;
+  position: relative;
+  box-shadow:
+    inset -3px -3px 7px var(--neu-hi),
+    inset  3px  3px 7px var(--neu-lo);
+  flex-shrink: 0;
+  transition: box-shadow var(--dur-base) var(--ease-soft);
+}
+.neu-toggle::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  background: var(--surface-raised);
+  box-shadow:
+    -2px -2px 5px var(--neu-hi),
+     2px  2px 5px var(--neu-lo);
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    background var(--dur-base) var(--ease-soft);
+}
+.neu-toggle[data-state="dark"]::after {
+  transform: translateX(24px);
+  background: var(--accent);
+}
+.neu-toggle .icon-sun,
+.neu-toggle .icon-moon {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  color: var(--text-muted);
+  pointer-events: none;
+  transition: color var(--dur-base) var(--ease-soft);
+}
+.neu-toggle .icon-sun  { left: 9px; }
+.neu-toggle .icon-moon { right: 9px; }
+.neu-toggle[data-state="light"] .icon-sun  { color: var(--accent); }
+.neu-toggle[data-state="dark"]  .icon-moon { color: var(--text-on-accent); }
+
+/* Tier-number — extruded number chip */
+.neu-chip {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: var(--text-md);
+  color: var(--accent);
+  background: var(--surface);
+  box-shadow:
+    -3px -3px 8px var(--neu-hi),
+     3px  3px 8px var(--neu-lo);
+  flex-shrink: 0;
+}
+
+/* Code recess inside neu cards */
+.neu-code {
+  background: var(--surface-sunken);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  box-shadow:
+    inset -3px -3px 7px var(--neu-hi),
+    inset  3px  3px 7px var(--neu-lo);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--code-text);
+  overflow-x: auto;
+}
+.neu-code pre { background: transparent; padding: 0; margin: 0; color: inherit; }
+.neu-code code { background: transparent; padding: 0; font-size: inherit; color: inherit; }
+
+/* Honored: motion reduction disables all hover transforms */
+@media (prefers-reduced-motion: reduce) {
+  .neu-raised, .neu-card, .neu-btn, .neu-toggle, .neu-toggle::after {
+    transition: none !important;
+  }
+  .neu-raised:hover, .neu-card:hover, .neu-btn:hover { transform: none !important; }
+}
+
+/* On coarse pointers (touch): disable hover lifts; rely on tap state */
+@media (pointer: coarse) {
+  .neu-raised:hover, .neu-card:hover, .neu-btn:hover {
+    transform: none;
+    box-shadow:
+      -6px -6px 14px var(--neu-hi),
+       6px  6px 14px var(--neu-lo);
+  }
+}

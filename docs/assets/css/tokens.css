@@ -1,0 +1,178 @@
+/* tokens.css — design tokens, OKLCH, light + dark, HIG-aligned neumorphism */
+:root {
+  /* Type scale (8px-based, fluid) */
+  --font-display: "Clash Display", "Geist Variable", system-ui, sans-serif;
+  --font-body: "Geist Variable", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Fluid type (clamp: mobile → desktop) */
+  --text-xs:  clamp(0.75rem, 0.7rem + 0.2vw,  0.8125rem);
+  --text-sm:  clamp(0.875rem, 0.82rem + 0.25vw, 1rem);
+  --text-base:clamp(1rem,    0.95rem + 0.3vw,  1.125rem);
+  --text-md:  clamp(1.125rem,1.05rem + 0.4vw,  1.375rem);
+  --text-lg:  clamp(1.375rem,1.2rem + 0.8vw,  2rem);
+  --text-xl:  clamp(1.75rem, 1.4rem + 1.5vw,  2.75rem);
+  --text-2xl: clamp(2.25rem, 1.7rem + 2.5vw,  3.75rem);
+  --text-3xl: clamp(2.75rem, 1.9rem + 4vw,    5.5rem);
+
+  /* 8px spacing grid */
+  --space-1: 0.5rem;
+  --space-2: 1rem;
+  --space-3: 1.5rem;
+  --space-4: 2rem;
+  --space-5: 2.5rem;
+  --space-6: 3rem;
+  --space-8: 4rem;
+  --space-10: 5rem;
+  --space-12: 6rem;
+
+  /* Radius (HIG: 12-16 cards, 8-10 buttons) */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* Motion (HIG: 200-350ms ease-out, never decorative) */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 200ms;
+  --dur-base: 280ms;
+  --dur-slow: 350ms;
+
+  /* Container */
+  --container-max: 72rem;
+  --container-pad: clamp(1rem, 0.5rem + 2vw, 2.5rem);
+
+  /* HIG minimum touch target */
+  --touch-min: 44px;
+
+  /* Color sync-state flags */
+  color-scheme: light dark;
+}
+
+/* ─── Light theme (default) ─────────────────────────────── */
+:root, :root[data-theme="light"] {
+  color-scheme: light;
+
+  /* Neumorphic neutral surface */
+  --surface:           oklch(95% 0.005 250);
+  --surface-raised:    oklch(97.5% 0.004 250);
+  --surface-pressed:   oklch(92%  0.006 250);
+  --surface-sunken:    oklch(91%  0.005 250);
+
+  /* Neumorphic shadow pair (signature treatment) */
+  --neu-hi:          oklch(100% 0 0);                 /* top-left highlight */
+  --neu-lo:          oklch(72%  0.018 255);           /* bottom-right shadow */
+
+  /* Text (HIG hierarchy: size > weight > color > position, never color alone) */
+  --text:            oklch(25%  0.022 250);
+  --text-secondary:  oklch(42%  0.020 250);
+  --text-muted:      oklch(55%  0.015 250);
+  --text-on-accent:  oklch(99%  0.005 250);
+
+  /* Single accent — teal, distinctive vs stock blue/purple */
+  --accent:          oklch(62%  0.13 180);
+  --accent-strong:   oklch(54%  0.14 180);
+  --accent-soft:     oklch(62%  0.13 180 / 0.12);
+  --accent-ring:     oklch(62%  0.13 180 / 0.55);
+
+  /* Semantic */
+  --success:         oklch(60%  0.13 160);
+  --warning:         oklch(75%  0.16 75);
+  --danger:          oklch(60%  0.18 25);
+
+  /* Code substrate */
+  --code-bg:         oklch(91%  0.005 250);
+  --code-text:       oklch(30%  0.020 255);
+  --code-accent:     oklch(55%  0.16 220);
+  --code-comment:    oklch(50%  0.010 250);
+
+  /* Borders (1px, 8-12% opacity — HIG) */
+  --border:          oklch(50% 0.010 250 / 0.12);
+  --border-strong:   oklch(50% 0.010 250 / 0.20);
+
+  /* Backdrop (for one focal translucent element, not page-wide) */
+  --backdrop:        oklch(95% 0.005 250 / 0.7);
+}
+
+/* ─── Dark theme ─────────────────────────────────────────── */
+/* HIG rule: elevated surfaces get LIGHTER, not darker, in dark mode */
+:root[data-theme="dark"], :root[data-theme="dark-app"] {
+  color-scheme: dark;
+
+  --surface:           oklch(22% 0.010 255);
+  --surface-raised:    oklch(26% 0.012 255);
+  --surface-pressed:   oklch(19% 0.010 255);
+  --surface-sunken:    oklch(18% 0.010 255);
+
+  /* Inverted neumorphic pair: highlight sits lighter, shadow sits darker */
+  --neu-hi:          oklch(32% 0.013 255);
+  --neu-lo:          oklch(10% 0.010 255);
+
+  --text:            oklch(96%  0.005 250);
+  --text-secondary:  oklch(78%  0.010 250);
+  --text-muted:      oklch(62%  0.010 250);
+  --text-on-accent:  oklch(15%  0.020 250);
+
+  --accent:          oklch(72%  0.13 180);
+  --accent-strong:   oklch(80%  0.13 180);
+  --accent-soft:     oklch(72%  0.13 180 / 0.16);
+  --accent-ring:     oklch(72%  0.13 180 / 0.50);
+
+  --success:         oklch(72%  0.13 160);
+  --warning:         oklch(80%  0.14 75);
+  --danger:          oklch(72%  0.16 25);
+
+  --code-bg:         oklch(16% 0.010 255);
+  --code-text:       oklch(88%  0.008 250);
+  --code-accent:     oklch(75%  0.15 220);
+  --code-comment:    oklch(60% 0.010 250);
+
+  --border:          oklch(100% 0 0 / 0.08);
+  --border-strong:   oklch(100% 0 0 / 0.16);
+
+  --backdrop:        oklch(22% 0.010 255 / 0.6);
+}
+
+/* System preference, no explicit choice yet */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]):not([data-theme="dark-app"]) {
+    color-scheme: dark;
+
+    --surface:           oklch(22% 0.010 255);
+    --surface-raised:    oklch(26% 0.012 255);
+    --surface-pressed:   oklch(19% 0.010 255);
+    --surface-sunken:    oklch(18% 0.010 255);
+    --neu-hi:          oklch(32% 0.013 255);
+    --neu-lo:          oklch(10% 0.010 255);
+    --text:            oklch(96%  0.005 250);
+    --text-secondary:  oklch(78%  0.010 250);
+    --text-muted:      oklch(62%  0.010 250);
+    --text-on-accent:  oklch(15%  0.020 250);
+    --accent:          oklch(72%  0.13 180);
+    --accent-strong:   oklch(80%  0.13 180);
+    --accent-soft:     oklch(72%  0.13 180 / 0.16);
+    --accent-ring:     oklch(72%  0.13 180 / 0.50);
+    --success:         oklch(72%  0.13 160);
+    --warning:         oklch(80%  0.14 75);
+    --danger:          oklch(72%  0.16 25);
+    --code-bg:         oklch(16% 0.010 255);
+    --code-text:       oklch(88%  0.008 250);
+    --code-accent:     oklch(75%  0.15 220);
+    --code-comment:    oklch(60% 0.010 250);
+    --border:          oklch(100% 0 0 / 0.08);
+    --border-strong:   oklch(100% 0 0 / 0.16);
+    --backdrop:        oklch(22% 0.010 255 / 0.6);
+  }
+}
+
+/* Honor reduced motion — non-negotiable HIG accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

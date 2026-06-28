@@ -1,0 +1,20 @@
+# docker-for-apple-container
+
+> Stateless `docker` command wrapper for Apple's `container` CLI on macOS.
+> Run Docker commands your tools already expect — without Docker Desktop, Podman, or any third-party adapter.
+
+docker-for-apple-container is a stateless translator: it maps each supported `docker` command to a clean Apple `container` equivalent and fails loudly on the rest. Apple `container` is the single source of truth, so the shim persists nothing of its own (no sidecar file, registry, or database). Even `docker compose` stays stateless — project membership is stored as labels in Apple's own object store, exactly as Docker Compose does.
+
+## Links
+
+- [Landing page (this site)](https://appautomaton.github.io/docker-for-apple-container/): overview, install steps, FAQ, command-tier table.
+- [README (canonical, source-of-truth)](https://github.com/appautomaton/docker-for-apple-container/blob/main/README.md): full command contract, compose design, caveats.
+- [GitHub repository](https://github.com/appautomaton/docker-for-apple-container)
+- [Homebrew tap](https://github.com/appautomaton/tap): `brew install appautomaton/tap/docker-for-apple-container`
+- [Releases](https://github.com/appautomaton/docker-for-apple-container/releases)
+- [LICENSE (MIT)](https://github.com/appautomaton/docker-for-apple-container/blob/main/LICENSE)
+
+## Optional
+
+- Sitemap: /sitemap.xml
+- robots.txt explicitly allow-lists GPTBot, OAI-SearchBot, ChatGPT-User, ClaudeBot, Claude-Web, PerplexityBot, Google-Extended, CCBot, anthropic-ai, Applebot.

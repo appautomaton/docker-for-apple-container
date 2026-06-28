@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 240" fill="none" role="img" aria-labelledby="diag-title diag-desc">
+  <title id="diag-title">docker-for-apple-container command translation flow</title>
+  <desc  id="diag-desc">A diagram showing how a docker command passes through the shim and arrives at Apple's container CLI; the shim holds no state of its own.</desc>
+
+  <!-- Subtle baseline -->
+  <line x1="40" y1="170" x2="760" y2="170" stroke="currentColor" stroke-opacity="0.12" stroke-width="1" stroke-dasharray="2 6"/>
+
+  <!-- ─ Node 1: docker caller -->
+  <g>
+    <rect x="40" y="60"  width="160" height="100" rx="14" fill="oklch(95% 0.005 250)" stroke="oklch(72% 0.018 255 / 0.4)" stroke-width="1.2"/>
+    <text x="120" y="100" text-anchor="middle" font-family="Clash Display, system-ui" font-weight="700" font-size="22" fill="oklch(25% 0.022 250)">docker</text>
+    <text x="120" y="124" text-anchor="middle" font-family="Geist Mono Variable, ui-monospace" font-size="11" fill="oklch(55% 0.015 250)">caller</text>
+    <text x="120" y="144" text-anchor="middle" font-family="Geist Mono Variable, ui-monospace" font-size="10" fill="oklch(55% 0.015 250)">docker-compose, scripts, IDEs</text>
+  </g>
+
+  <!-- ─ Arrow 1 -->
+  <path d="M200 110 H260" stroke="oklch(55% 0.13 180)" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M252 102 L260 110 L252 118" stroke="oklch(55% 0.13 180)" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="230" y="98" text-anchor="middle" font-family="Geist Mono Variable, ui-monospace" font-size="11" fill="oklch(55% 0.013 180)">argv</text>
+
+  <!-- ─ Node 2: shim -->
+  <g>
+    <rect x="260" y="40" width="240" height="140" rx="18" fill="oklch(95% 0.005 250)" stroke="oklch(72% 0.018 255 / 0.4)" stroke-width="1.2"/>
+    <text x="380" y="78" text-anchor="middle" font-family="Clash Display, system-ui" font-weight="700" font-size="22" fill="oklch(25% 0.022 250)">shim</text>
+    <text x="380" y="104" text-anchor="middle" font-family="Geist Mono Variable, ui-monospace" font-size="11" fill="oklch(55% 0.015 250)">stateless</text>
+    <text x="380" y="125" text-anchor="middle" font-family="Geist Mono Variable, ui-monospace" font-size="10.5" fill="oklch(55% 0.015 250)">no sidecar · no cache · no registry</text>
+    <text x="380" y="148" text-anchor="middle" font-family="Geist Mono Variable, ui-monospace" font-size="10.5" fill="oklch(55% 0.015 250)">labels stored in Apple's object store</text>
+  </g>
+
+  <!-- ─ Arrow 2 -->
+  <path d="M500 110 H560" stroke="oklch(55% 0.13 180)" stroke-width="1.6" stroke-linecap="round"/>
+  <path d="M552 102 L560 110 L552 118" stroke="oklch(55% 0.13 180)" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="530" y="98" text-anchor="middle" font-family="Geist Mono Variable, ui-monospace" font-size="11" fill="oklch(55% 0.013 180)">translate</text>
+
+  <!-- ─ Node 3: Apple container -->
+  <g>
+    <rect x="560" y="60" width="200" height="100" rx="14" fill="oklch(62% 0.13 180)" stroke="none"/>
+    <text x="660" y="100" text-anchor="middle" font-family="Clash Display, system-ui" font-weight="700" font-size="22" fill="oklch(99% 0.005 250)">container</text>
+    <text x="660" y="124" text-anchor="middle" font-family="Geist Mono Variable, ui-monospace" font-size="11" fill="oklch(99% 0.005 250 / 0.92)">Apple CLI · source of truth</text>
+    <text x="660" y="144" text-anchor="middle" font-family="Geist Mono Variable, ui-monospace" font-size="10" fill="oklch(99% 0.005 250 / 0.78)">apiserver running on macOS</text>
+  </g>
+
+  <!-- ─ State spine (the signature idea) -->
+  <text x="380" y="200" text-anchor="middle" font-family="Geist Mono Variable, ui-monospace" font-size="11" fill="oklch(55% 0.015 250)" letter-spacing="0.05em">
+    ← state lives here, not in the shim →
+  </text>
+</svg>

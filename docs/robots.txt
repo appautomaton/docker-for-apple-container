@@ -1,0 +1,45 @@
+# Allow all crawlers, including AI/generative engines (GEO).
+# Per Google's AI-optimization guide, treat GEO as SEO: no "special" files needed.
+# llms.txt is included as a cheap signal for Anthropic and OpenAI tooling, ignored by Google.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://appautomaton.github.io/docker-for-apple-container/sitemap.xml
+
+# ── Explicit AI crawler allow-list (redundant but explicit) ──
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+User-agent: Applebot
+Allow: /
