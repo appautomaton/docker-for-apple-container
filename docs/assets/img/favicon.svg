@@ -1,13 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <!-- A neumorphic container: dock-style chip with docker melipomeni whale ink -->
-  <rect x="1" y="1" width="30" height="30" rx="9" fill="oklch(95% 0.005 250)"/>
-  <rect x="1" y="1" width="30" height="30" rx="9" fill="none" stroke="oklch(72% 0.018 255 / 0.5)" stroke-width="0.5"/>
-  <!-- Apple-container glyph: extruded nested rounded rect -->
-  <rect x="9" y="11" width="14" height="10" rx="3" fill="oklch(62% 0.13 180)"/>
-  <rect x="11.5" y="9" width="9" height="3" rx="1.5" fill="oklch(72% 0.018 255)"/>
-  <!-- Shim arrow: docker→shim→container -->
-  <path d="M5 16 H9" stroke="oklch(42% 0.020 250)" stroke-width="1.4" stroke-linecap="round"/>
-  <path d="M7.5 14 L9 16 L7.5 18" stroke="oklch(42% 0.020 250)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <path d="M23 16 H27" stroke="oklch(42% 0.020 250)" stroke-width="1.4" stroke-linecap="round"/>
-  <path d="M25.5 14 L27 16 L25.5 18" stroke="oklch(42% 0.020 250)" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="8" fill="#3f3fce"/>
+  <g stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M9 8.5 V23.5"/>
+    <path d="M9 16 H22.5"/>
+    <path d="M18 11.5 L22.5 16 L18 20.5"/>
+  </g>
 </svg>
