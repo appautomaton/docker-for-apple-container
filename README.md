@@ -54,10 +54,12 @@ from an environment variable or config setting, point that at the installed
 ## Requirements
 
 - macOS with Apple `container` 1.0.0
-- Python 3.9+ (standard library only, no third-party packages)
-- `container system status` should report the apiserver as running
+- The `container` apiserver running (check with `container system status`)
 
-Start it with:
+Nothing else to install. The shim is pure Python standard library with no
+third-party packages, and it runs on the Python that ships with macOS.
+
+Start the apiserver with:
 
 ```bash
 container system start
