@@ -25,17 +25,14 @@ body {
 }
 
 /* ─────────────────────── Typography ────────────────────── */
-h1, h2, h3, h4 {
-  font-family: var(--font-display);
-  font-weight: 600;
-  line-height: 1.05;
-  letter-spacing: -0.02em;
-  color: var(--ink);
-  text-wrap: balance;
-}
-h1 { font-size: var(--text-2xl); font-weight: 600; letter-spacing: -0.035em; }
-h2 { font-size: var(--text-xl); letter-spacing: -0.03em; }
-h3 { font-size: var(--text-md); font-weight: 500; letter-spacing: -0.015em; }
+h1, h2, h3, h4 { color: var(--ink); text-wrap: balance; line-height: 1.05; }
+/* Serif (Fraunces) is reserved for the big display moments; hierarchy comes
+   from weight, not just color. Everything else stays in the grotesque. */
+h1, h2 { font-family: var(--font-display); font-optical-sizing: auto; }
+h3, h4 { font-family: var(--font-body); }
+h1 { font-size: var(--text-2xl); font-weight: 400; letter-spacing: -0.018em; line-height: 1.0; }
+h2 { font-size: var(--text-xl); font-weight: 500; letter-spacing: -0.012em; }
+h3 { font-size: var(--text-md); font-weight: 600; letter-spacing: -0.01em; }
 
 p { color: var(--ink-2); }
 strong, b { font-weight: 600; color: var(--ink); }
@@ -112,7 +109,7 @@ main { padding-bottom: var(--section-y); }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
-  font-family: var(--font-display); font-weight: 500; font-size: var(--text-base);
+  font-family: var(--font-body); font-weight: 500; font-size: var(--text-base);
   letter-spacing: -0.01em;
   min-height: var(--touch-min); padding: 0 var(--space-5);
   border: 0; border-radius: var(--radius-full); cursor: pointer;
@@ -141,7 +138,7 @@ main { padding-bottom: var(--section-y); }
 }
 .brand {
   display: inline-flex; align-items: center; gap: var(--space-3);
-  font-family: var(--font-display); font-weight: 600; font-size: var(--text-md);
+  font-family: var(--font-body); font-weight: 600; font-size: var(--text-md);
   letter-spacing: -0.02em; color: var(--ink); margin-right: auto;
 }
 .brand:hover { color: var(--ink); }
@@ -202,7 +199,7 @@ main { padding-bottom: var(--section-y); }
 .hero { padding-top: clamp(3rem, 8vw, 5.5rem); }
 .hero__inner { max-width: 48rem; }
 .hero h1 { margin-bottom: var(--space-5); }
-.hero h1 .accent { color: var(--accent); }
+.hero h1 .accent { color: var(--accent); font-weight: 600; }
 .hero__sub {
   font-size: var(--text-md); color: var(--ink-2); max-width: 36rem;
   line-height: 1.55; margin-bottom: var(--space-6);
@@ -245,7 +242,7 @@ main { padding-bottom: var(--section-y); }
   width: 40px; height: 40px; border-radius: 12px; margin-bottom: var(--space-4);
   display: grid; place-items: center; flex-shrink: 0;
   background: var(--bg); box-shadow: var(--nm-inset-sm);
-  color: var(--accent); font-family: var(--font-display); font-weight: 600; font-size: var(--text-md);
+  color: var(--accent); font-family: var(--font-body); font-weight: 600; font-size: var(--text-md);
 }
 .card h3 { margin-bottom: var(--space-2); }
 .card p { font-size: var(--text-sm); color: var(--ink-2); line-height: 1.55; }
@@ -297,7 +294,7 @@ main { padding-bottom: var(--section-y); }
   counter-increment: step; width: 40px; height: 40px; flex-shrink: 0;
   display: grid; place-content: center; border-radius: var(--radius-full);
   background: var(--bg); box-shadow: var(--nm-raised-sm);
-  font-family: var(--font-display); font-weight: 600; color: var(--accent);
+  font-family: var(--font-body); font-weight: 600; color: var(--accent);
 }
 .step__n::before { content: counter(step); }
 .step h3 { margin-bottom: var(--space-2); }
@@ -316,7 +313,7 @@ pre code { background: none; box-shadow: none; padding: 0; color: inherit; font-
 .source-card { margin-top: var(--space-5); }
 .source-card > summary {
   list-style: none; cursor: pointer; padding: var(--space-4) var(--pad-card);
-  font-family: var(--font-display); font-weight: 500; font-size: var(--text-base);
+  font-family: var(--font-body); font-weight: 500; font-size: var(--text-base);
   display: flex; align-items: center; justify-content: space-between;
 }
 .source-card > summary::-webkit-details-marker { display: none; }
@@ -330,7 +327,7 @@ pre code { background: none; box-shadow: none; padding: 0; color: inherit; font-
 .faq__item { background: var(--bg); border-radius: var(--radius-md); box-shadow: var(--nm-raised); }
 .faq__item > summary {
   list-style: none; cursor: pointer; padding: var(--space-5) var(--pad-card);
-  font-family: var(--font-display); font-weight: 500; font-size: var(--text-md);
+  font-family: var(--font-body); font-weight: 500; font-size: var(--text-md);
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-4);
 }
 .faq__item > summary::-webkit-details-marker { display: none; }
@@ -342,7 +339,7 @@ pre code { background: none; box-shadow: none; padding: 0; color: inherit; font-
 /* ───────────────────────── Footer ──────────────────────── */
 .site-footer { border-top: 1px solid var(--hairline); padding-block: var(--space-7); }
 .site-footer__top { display: flex; flex-wrap: wrap; gap: var(--space-6); justify-content: space-between; }
-.site-footer__brand { font-family: var(--font-display); font-weight: 600; font-size: var(--text-md); margin-bottom: var(--space-2); }
+.site-footer__brand { font-family: var(--font-body); font-weight: 600; font-size: var(--text-md); margin-bottom: var(--space-2); }
 .site-footer__brand b { color: var(--accent); }
 .site-footer__tagline { font-size: var(--text-sm); color: var(--ink-3); max-width: 28rem; }
 .site-footer__links { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); font-size: var(--text-sm); }

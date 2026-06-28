@@ -6,8 +6,8 @@
  */
 :root {
   /* Type */
-  --font-display: "Clash Display", "Geist Variable", system-ui, sans-serif;
-  --font-body: "Geist Variable", system-ui, -apple-system, sans-serif;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --font-body: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
 
   /* Fluid type scale */
