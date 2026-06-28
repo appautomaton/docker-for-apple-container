@@ -1,12 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "docker-for-apple-container"
-version = "0.1.0"
+version = "0.1.1"
 description = "Docker CLI compatibility shim over Apple's container CLI."
-requires-python = ">=3.11"
 readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "AppCubic" }]
+keywords = ["docker", "docker-compose", "apple-container", "macos", "containers"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Build Tools",
+]
 
 [project.scripts]
 docker-for-apple-container = "container_docker_shim.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/appautomaton/docker-for-apple-container"
+Repository = "https://github.com/appautomaton/docker-for-apple-container"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/container_docker_shim"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

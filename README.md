@@ -36,7 +36,7 @@ setting, point that at the repo's `bin/docker`.
 ## Requirements
 
 - macOS with Apple `container` 1.0.0
-- Python 3.11+ (standard library only, no third-party packages)
+- Python 3.9+ (standard library only, no third-party packages)
 - `container system status` should report the apiserver as running
 
 Start it with:
