@@ -141,6 +141,35 @@
   font-weight: 500;
 }
 
+/* Visible source-backlink — LLM/entity anchor; not icon-only */
+.hero__repo-link {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm);
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.hero__repo-link a {
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: var(--accent-soft);
+  text-underline-offset: 3px;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    text-decoration-color var(--dur-fast) var(--ease-out);
+}
+.hero__repo-link a:hover {
+  color: var(--accent-strong);
+  text-decoration-color: var(--accent);
+}
+.hero__repo-icon {
+  display: inline-flex;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+.hero__repo-icon svg { display: block; }
+
 /* ── Terminal widget (signature neumorphic accent) ──── */
 .terminal {
   padding: var(--space-3) 0;
