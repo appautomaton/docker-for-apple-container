@@ -22,7 +22,11 @@ body {
   line-height: 1.6;
   font-weight: 400;
   color: var(--text);
-  background-color: var(--surface);
+  background-color: var(--bg-base);
+  background-image:
+    radial-gradient(60rem 42rem at 100% -8%, var(--bg-glow-1), transparent 60%),
+    radial-gradient(52rem 40rem at -8% 108%, var(--bg-glow-2), transparent 58%);
+  background-attachment: fixed;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-feature-settings: 'kern' 1, 'liga' 1, 'calt' 1, 'ss01' 1;
@@ -190,7 +194,9 @@ pre code {
 .tok-output { color: var(--text-muted); }
 
 /* ── Motion utility ─────────────────────────────────── */
-.reveal {
+/* Only hide not-yet-revealed elements, and only when JS can reveal them.
+   The :not(.is-in) keeps specificity from blocking the is-in state. */
+html.js .reveal:not(.is-in) {
   opacity: 0;
   transform: translateY(8px);
 }
@@ -202,7 +208,7 @@ pre code {
     transform var(--dur-slow) var(--ease-out);
 }
 
-/* kiedyJS reveals: only when motion OK */
+/* Staggered reveal delays: only when motion is allowed */
 @media (prefers-reduced-motion: no-preference) {
   .reveal.is-in {
     transition-duration: var(--dur-slow);

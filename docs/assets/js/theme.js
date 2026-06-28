@@ -68,4 +68,23 @@
       el.classList.add("is-in");
     });
   }
+
+  // Nav: open inline on desktop, collapsible toggle on mobile.
+  var navDisclosure = document.querySelector(".nav-disclosure");
+  if (navDisclosure) {
+    var mqNav = window.matchMedia("(max-width: 767px)");
+    var syncNav = function () {
+      if (mqNav.matches) navDisclosure.removeAttribute("open");
+      else navDisclosure.setAttribute("open", "");
+    };
+    syncNav();
+    if (mqNav.addEventListener) mqNav.addEventListener("change", syncNav);
+    else if (mqNav.addListener) mqNav.addListener(syncNav);
+    navDisclosure.querySelectorAll(".nav-links a").forEach(function (link) {
+      link.addEventListener("click", function () { if (mqNav.matches) navDisclosure.removeAttribute("open"); });
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && mqNav.matches) navDisclosure.removeAttribute("open");
+    });
+  }
 })();

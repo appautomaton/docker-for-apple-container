@@ -51,20 +51,57 @@
 .brand__name { font-weight: 700; }
 .brand__name b { color: var(--accent); font-weight: 700; }
 
+/* Primary nav: mobile-first disclosure (works without JS), inline row on desktop */
+.nav-disclosure { position: relative; }
+
+.nav-toggle {
+  display: grid;
+  place-items: center;
+  list-style: none;
+  cursor: pointer;
+  width: var(--touch-min);
+  height: var(--touch-min);
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  background: var(--surface);
+  box-shadow: -3px -3px 8px var(--neu-hi), 3px 3px 8px var(--neu-lo);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.nav-toggle::-webkit-details-marker { display: none; }
+.nav-toggle:hover { color: var(--text); }
+.nav-toggle .nav-toggle__close { display: none; }
+.nav-disclosure[open] .nav-toggle .nav-toggle__open { display: none; }
+.nav-disclosure[open] .nav-toggle .nav-toggle__close { display: inline; }
+
 .nav-links {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
   list-style: none;
   margin: 0;
   padding: 0;
+  display: none;
+}
+.nav-disclosure[open] .nav-links {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--space-2));
+  min-width: 220px;
+  padding: var(--space-1);
+  border-radius: var(--radius-lg);
+  background: var(--surface-raised);
+  box-shadow: -8px -8px 18px var(--neu-hi), 8px 8px 18px var(--neu-lo);
+  z-index: 60;
 }
 .nav-links a {
   color: var(--text-secondary);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   font-weight: 500;
+  display: block;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
 }
-.nav-links a:hover { color: var(--text); text-decoration: none; }
+.nav-links a:hover { color: var(--text); text-decoration: none; background: var(--surface-sunken); }
 
 .site-header__right {
   display: flex;
@@ -198,8 +235,8 @@
 .terminal__body {
   padding: var(--space-2) var(--space-3) var(--space-1);
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  line-height: 1.7;
+  font-size: clamp(0.72rem, 0.62rem + 0.4vw, 0.85rem);
+  line-height: 1.8;
   color: var(--text);
 }
 .terminal__line { display: block; margin: 0; }
@@ -238,9 +275,35 @@
   max-width: 68ch;
   margin: var(--space-2) 0 var(--space-5);
 }
-.section__lead::first-letter {
-  color: var(--accent);
+
+/* Tier card: one-line essence + a few items, full list behind "Show all" */
+.tier__essence {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-2);
 }
+.tier__more { margin-top: auto; padding-top: var(--space-2); }
+.tier__more > summary {
+  list-style: none;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 32px;
+}
+.tier__more > summary::-webkit-details-marker { display: none; }
+.tier__more > summary::after {
+  content: "›";
+  font-weight: 700;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.tier__more[open] > summary::after { transform: rotate(90deg); }
+.tier__more[open] > summary { color: var(--text-muted); }
+.tier__more .tier__list { margin-top: var(--space-2); }
 
 /* ── Tier cards (.tiers grid) ──────────────────────── */
 .tiers {
@@ -275,17 +338,18 @@
 }
 .tier__list li {
   padding: var(--space-1) 0;
+  padding-left: 1.5em;
+  position: relative;
   font-size: var(--text-sm);
   color: var(--text-secondary);
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-2);
 }
 .tier__list li::before {
   content: "›";
+  position: absolute;
+  left: 0;
+  top: var(--space-1);
   font-family: var(--font-mono);
   color: var(--accent);
-  flex-shrink: 0;
   font-weight: 600;
 }
 .tier__list li.is-refused::before { content: "✕"; color: var(--danger); }
@@ -446,6 +510,24 @@ details.neu-card[open] .faq__a {
   .tiers {
     grid-template-columns: repeat(2, 1fr);
   }
+
+  /* Nav becomes an inline row; hamburger hidden, links always visible */
+  .nav-toggle { display: none; }
+  .nav-links,
+  .nav-disclosure[open] .nav-links {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-3);
+    position: static;
+    min-width: 0;
+    padding: 0;
+    background: none;
+    box-shadow: none;
+    border: 0;
+  }
+  .nav-links a { font-size: var(--text-sm); padding: 0; background: none; }
+  .nav-links a:hover { background: none; }
 }
 
 @media (min-width: 1024px) {
@@ -453,11 +535,9 @@ details.neu-card[open] .faq__a {
 }
 
 @media (max-width: 767px) {
-  .nav-links { display: none; }
   .hero {
     padding: var(--space-6) 0 var(--space-8);
   }
-  .tiews__head { flex-direction: column; align-items: flex-start; }
   .site-footer__links { text-align: left; }
   .site-footer__inner { grid-template-columns: 1fr; }
 }

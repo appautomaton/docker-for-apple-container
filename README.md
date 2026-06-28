@@ -1,15 +1,13 @@
 # docker-for-apple-container
 
 [![PyPI version](https://img.shields.io/pypi/v/docker-for-apple-container?style=flat-square)](https://pypi.org/project/docker-for-apple-container/)
-[![Homebrew](https://img.shields.io/badge/homebrew-appautomaton/tap-orange?style=flat-square)](https://github.com/appautomaton/tap)
+[![Homebrew](https://img.shields.io/badge/homebrew-tap-orange?style=flat-square)](https://github.com/appautomaton/homebrew-tap)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue?style=flat-square)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%28Apple%20Silicon%29-lightgrey?style=flat-square)](#requirements)
 [![Website](https://img.shields.io/badge/website-appautomaton.github.io-blue?style=flat-square)](https://appautomaton.github.io/docker-for-apple-container/)
 
 > Run `docker` and `docker compose` on macOS, backed by Apple's native `container` CLI. No Docker Desktop.
->
-> Website: <https://appautomaton.github.io/docker-for-apple-container/> · PyPI: <https://pypi.org/project/docker-for-apple-container/>
 
 `docker-for-apple-container` is a small `docker` command wrapper for Apple's
 `container` CLI. It lets tools that expect a `docker` binary run against Apple
