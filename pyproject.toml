@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "docker-for-apple-container"
-version = "0.1.1"
+version = "0.1.2"
 description = "Docker CLI compatibility shim over Apple's container CLI."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -21,7 +21,7 @@ classifiers = [
 ]
 
 [project.scripts]
-docker-for-apple-container = "container_docker_shim.cli:main"
+docker = "container_docker_shim.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/appautomaton/docker-for-apple-container"

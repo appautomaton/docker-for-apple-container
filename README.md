@@ -15,14 +15,22 @@ by querying Apple rather than reading shim-owned state.
 
 ## Install
 
+Every method below gives you a `docker` command backed by Apple `container`.
+Use them on a Mac that runs Apple `container` rather than Docker Desktop.
+
 With Homebrew:
 
 ```bash
 brew install appautomaton/tap/docker-for-apple-container
 ```
 
-Or from source. The executable is `bin/docker`. Clone the repo and put it on
-your PATH:
+With pip:
+
+```bash
+pip install docker-for-apple-container
+```
+
+From source, symlink the launcher onto your PATH:
 
 ```bash
 git clone https://github.com/appautomaton/docker-for-apple-container.git
@@ -30,8 +38,9 @@ cd docker-for-apple-container
 ln -sf "$(pwd)/bin/docker" ~/.local/bin/docker
 ```
 
-If a tool resolves its Docker binary from an environment variable or config
-setting, point that at the repo's `bin/docker`.
+After any of these, run `docker` as usual. If a tool resolves its Docker binary
+from an environment variable or config setting, point that at the installed
+`docker` (or the repo's `bin/docker`).
 
 ## Requirements
 
