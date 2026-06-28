@@ -1,90 +1,71 @@
-// theme.js — system + manual dark/light toggle, persisted.
-// Honor prefers-color-scheme; explicit choice wins; no FOUC (script in head).
-
+// theme.js — theme toggle (persisted), scroll reveals, responsive nav.
 (function () {
   "use strict";
-  var STORAGE = "dac-color-scheme";
+  var STORAGE = "dac-theme";
   var root = document.documentElement;
-  var toggle = document.querySelector("[data-theme-toggle]");
-  var stateLabel = document.querySelector("[data-theme-state]");
 
   function systemPref() {
-    return window.matchMedia &&
-      window.matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark" : "light";
+    return window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
   }
 
-  // Use stored if valid; else system; default light if no signal.
+  var toggle = document.querySelector("[data-theme-toggle]");
   var stored = null;
   try { stored = localStorage.getItem(STORAGE); } catch (e) {}
   var initial = (stored === "light" || stored === "dark") ? stored : systemPref();
   root.setAttribute("data-theme", initial);
-  if (toggle)   toggle.setAttribute("data-state", initial);
-  if (stateLabel) stateLabel.textContent = initial;
+  if (toggle) toggle.setAttribute("data-state", initial);
 
-  // Update toggle glyph on subsequent system changes when user hasn't chosen.
+  // Follow the system when the user has not chosen explicitly.
   if (window.matchMedia) {
-    var mql = window.matchMedia("(prefers-color-scheme: dark)");
-    var onChange = function (e) {
+    var mqDark = matchMedia("(prefers-color-scheme: dark)");
+    var onSystem = function (e) {
       try { if (localStorage.getItem(STORAGE)) return; } catch (err) {}
       var next = e.matches ? "dark" : "light";
       root.setAttribute("data-theme", next);
       if (toggle) toggle.setAttribute("data-state", next);
-      if (stateLabel) stateLabel.textContent = next;
     };
-    if (mql.addEventListener) mql.addEventListener("change", onChange);
-    else if (mql.addListener) mql.addListener(onChange);
+    if (mqDark.addEventListener) mqDark.addEventListener("change", onSystem);
+    else if (mqDark.addListener) mqDark.addListener(onSystem);
   }
 
-  // Click to cycle only between explicit light/dark.
   if (toggle) {
     toggle.addEventListener("click", function () {
-      var next = (root.getAttribute("data-theme") === "dark") ? "light" : "dark";
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
       root.setAttribute("data-theme", next);
       toggle.setAttribute("data-state", next);
-      if (stateLabel) stateLabel.textContent = next;
       try { localStorage.setItem(STORAGE, next); } catch (e) {}
     });
   }
 
-  // Progressive enhancement reveal on scroll — gated by reduced motion.
-  var prefersReduced = window.matchMedia &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (!prefersReduced && "IntersectionObserver" in window) {
+  // Reveal on scroll (only when motion is allowed).
+  var reduce = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!reduce && "IntersectionObserver" in window) {
     var io = new IntersectionObserver(function (entries) {
       entries.forEach(function (entry) {
-        if (entry.isIntersecting) {
-          entry.target.classList.add("is-in");
-          io.unobserve(entry.target);
-        }
+        if (entry.isIntersecting) { entry.target.classList.add("is-in"); io.unobserve(entry.target); }
       });
-    }, { rootMargin: "0px 0px -10% 0px", threshold: 0.05 });
-    document.querySelectorAll(".reveal").forEach(function (el) {
-      io.observe(el);
-    });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.05 });
+    document.querySelectorAll(".reveal").forEach(function (el) { io.observe(el); });
   } else {
-    // No observer: just show everything.
-    document.querySelectorAll(".reveal").forEach(function (el) {
-      el.classList.add("is-in");
-    });
+    document.querySelectorAll(".reveal").forEach(function (el) { el.classList.add("is-in"); });
   }
 
-  // Nav: open inline on desktop, collapsible toggle on mobile.
-  var navDisclosure = document.querySelector(".nav-disclosure");
-  if (navDisclosure) {
-    var mqNav = window.matchMedia("(max-width: 767px)");
+  // Nav: inline + open on desktop, collapsible on mobile.
+  var nav = document.querySelector(".nav");
+  if (nav) {
+    var mqMobile = matchMedia("(max-width: 767px)");
     var syncNav = function () {
-      if (mqNav.matches) navDisclosure.removeAttribute("open");
-      else navDisclosure.setAttribute("open", "");
+      if (mqMobile.matches) nav.removeAttribute("open");
+      else nav.setAttribute("open", "");
     };
     syncNav();
-    if (mqNav.addEventListener) mqNav.addEventListener("change", syncNav);
-    else if (mqNav.addListener) mqNav.addListener(syncNav);
-    navDisclosure.querySelectorAll(".nav-links a").forEach(function (link) {
-      link.addEventListener("click", function () { if (mqNav.matches) navDisclosure.removeAttribute("open"); });
+    if (mqMobile.addEventListener) mqMobile.addEventListener("change", syncNav);
+    else if (mqMobile.addListener) mqMobile.addListener(syncNav);
+    nav.querySelectorAll(".nav__links a").forEach(function (link) {
+      link.addEventListener("click", function () { if (mqMobile.matches) nav.removeAttribute("open"); });
     });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && mqNav.matches) navDisclosure.removeAttribute("open");
+      if (e.key === "Escape" && mqMobile.matches) nav.removeAttribute("open");
     });
   }
 })();

@@ -1,8 +1,8 @@
-/* tokens.css — design tokens for the Liquid Glass system (Apple HIG 2026-aligned)
+/* tokens.css — design tokens for the "Precision instrument" system
  *
- * Evolution of neumorphism: translucent layered glass over a quiet ambient field,
- * a single soft elevation shadow, a light-catching hairline edge, and a teal→indigo
- * accent that encodes the docker ↦ container translation flow. OKLCH throughout.
+ * Refined neumorphism: one calm surface that elements extrude from, subtle dual
+ * shadows plus a hairline, a single solid indigo accent, and zero gradients.
+ * OKLCH throughout. Light and dark are tuned independently.
  */
 :root {
   /* Type */
@@ -10,206 +10,139 @@
   --font-body: "Geist Variable", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
 
-  /* Fluid type scale (mobile → desktop) */
-  --text-xs:  clamp(0.75rem, 0.7rem + 0.2vw,  0.8125rem);
-  --text-sm:  clamp(0.875rem, 0.82rem + 0.25vw, 1rem);
-  --text-base:clamp(1rem,    0.95rem + 0.3vw,  1.125rem);
-  --text-md:  clamp(1.125rem,1.05rem + 0.4vw,  1.375rem);
-  --text-lg:  clamp(1.375rem,1.2rem + 0.8vw,  2rem);
-  --text-xl:  clamp(1.75rem, 1.4rem + 1.5vw,  2.75rem);
-  --text-2xl: clamp(2.25rem, 1.7rem + 2.5vw,  3.75rem);
-  --text-3xl: clamp(2.75rem, 1.9rem + 4vw,    5.5rem);
+  /* Fluid type scale */
+  --text-xs:  clamp(0.75rem, 0.72rem + 0.15vw, 0.8125rem);
+  --text-sm:  clamp(0.875rem, 0.84rem + 0.18vw, 0.95rem);
+  --text-base:clamp(1rem, 0.96rem + 0.2vw, 1.0625rem);
+  --text-md:  clamp(1.125rem, 1.06rem + 0.32vw, 1.3125rem);
+  --text-lg:  clamp(1.375rem, 1.25rem + 0.6vw, 1.75rem);
+  --text-xl:  clamp(1.875rem, 1.55rem + 1.5vw, 2.75rem);
+  --text-2xl: clamp(2.5rem, 1.9rem + 2.8vw, 4rem);
 
-  /* 8px spacing grid */
-  --space-1: 0.5rem;  --space-2: 1rem;    --space-3: 1.5rem;
-  --space-4: 2rem;    --space-5: 2.5rem;  --space-6: 3rem;
-  --space-8: 4rem;    --space-10: 5rem;   --space-12: 6rem;
+  /* Spacing scale (strict, used everywhere) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+  --space-9: 6rem;
 
-  /* Radius (HIG: generous, continuous-corner feel) */
-  --radius-sm: 10px;  --radius-md: 14px;  --radius-lg: 20px;
-  --radius-xl: 28px;  --radius-full: 9999px;
+  /* Rhythm primitives */
+  --section-y: clamp(4rem, 8vw, 7rem);          /* vertical space between sections */
+  --container-max: 60rem;
+  --container-pad: clamp(1.25rem, 4vw, 2rem);
+  --gap-card: var(--space-5);                    /* gap between cards in a grid */
+  --pad-card: clamp(1.25rem, 3vw, 1.75rem);     /* internal card padding */
+
+  /* Radius */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-full: 9999px;
 
   /* Motion */
-  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
-  --ease-soft: cubic-bezier(0.4, 0, 0.2, 1);
-  --dur-fast: 180ms;  --dur-base: 260ms;  --dur-slow: 360ms;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 160ms;
+  --dur-base: 240ms;
 
-  /* Layout */
-  --container-max: 72rem;
-  --container-pad: clamp(1rem, 0.5rem + 2vw, 2.5rem);
   --touch-min: 44px;
-
-  /* Glass */
-  --glass-blur: 20px;
-  --glass-saturate: 180%;
-
   color-scheme: light dark;
 }
 
-/* ─── Light: "Daybreak studio" ──────────────────────────── */
+/* ─── Light: soft graphite ──────────────────────────────── */
 :root, :root[data-theme="light"] {
   color-scheme: light;
 
-  --bg-base:        oklch(96.5% 0.007 235);
-  --bg-glow-1:      oklch(72% 0.11 195 / 0.10);   /* teal, top-right */
-  --bg-glow-2:      oklch(62% 0.13 270 / 0.08);   /* indigo, bottom-left */
+  --bg:        oklch(93.5% 0.004 262);          /* the neumorphic surface */
+  --nm-dark:   oklch(85% 0.008 262);            /* bottom-right shadow */
+  --nm-light:  oklch(99.5% 0.001 262);          /* top-left highlight */
 
-  --surface:        oklch(98% 0.004 235);          /* opaque fallback */
-  --surface-raised: oklch(99% 0.003 235);
-  --surface-sunken: oklch(93.5% 0.006 235);
+  --ink:       oklch(27% 0.02 264);
+  --ink-2:     oklch(44% 0.016 264);
+  --ink-3:     oklch(51% 0.014 264);
 
-  /* Glass material */
-  --glass:          oklch(99% 0.003 235 / 0.55);
-  --glass-strong:   oklch(99% 0.003 235 / 0.74);
-  --glass-border:   oklch(100% 0 0 / 0.7);
-  --glass-edge:     oklch(55% 0.02 250 / 0.10);
-  --glass-hi:       oklch(100% 0 0 / 0.85);        /* inner top light line */
+  --accent:        oklch(50% 0.17 268);
+  --accent-hover:  oklch(44% 0.18 268);
+  --accent-ink:    oklch(99% 0.01 268);
+  --accent-soft:   oklch(50% 0.17 268 / 0.12);
+  --accent-ring:   oklch(50% 0.17 268 / 0.5);
 
-  /* Single soft elevation (glass casts one shadow, not a neumorphic pair) */
-  --shadow-1: 0 1px 2px oklch(48% 0.03 255 / 0.06), 0 10px 26px oklch(48% 0.03 255 / 0.10);
-  --shadow-2: 0 2px 6px oklch(48% 0.03 255 / 0.08), 0 20px 44px oklch(48% 0.03 255 / 0.16);
+  --danger:    oklch(53% 0.19 25);
 
-  /* Soft-depth pair kept only for small tactile controls (chip, toggle) */
-  --neu-hi:         oklch(100% 0 0 / 0.9);
-  --neu-lo:         oklch(72% 0.018 255 / 0.5);
+  --hairline:  oklch(45% 0.02 264 / 0.10);
+  --code-ink:  oklch(34% 0.03 268);
 
-  --text:           oklch(24% 0.022 255);
-  --text-secondary: oklch(44% 0.018 255);
-  --text-muted:     oklch(50% 0.016 255);
-  --text-on-accent: oklch(99% 0.004 235);
-
-  /* Teal → indigo translation-flow accent */
-  --accent:         oklch(60% 0.13 195);
-  --accent-strong:  oklch(52% 0.14 198);
-  --accent-2:       oklch(56% 0.15 270);
-  --accent-soft:    oklch(60% 0.13 195 / 0.12);
-  --accent-ring:    oklch(60% 0.13 195 / 0.55);
-  --accent-gradient: linear-gradient(135deg, oklch(64% 0.14 195), oklch(57% 0.15 268));
-
-  --success:        oklch(60% 0.13 160);
-  --warning:        oklch(72% 0.16 75);
-  --danger:         oklch(58% 0.18 25);
-
-  --code-bg:        oklch(94% 0.006 235 / 0.7);
-  --code-text:      oklch(30% 0.02 255);
-  --code-accent:    oklch(52% 0.15 235);
-  --code-comment:   oklch(54% 0.012 250);
-
-  --border:         oklch(50% 0.01 250 / 0.12);
-  --border-strong:  oklch(50% 0.01 250 / 0.20);
-
-  --backdrop:       oklch(98% 0.004 235 / 0.65);
+  /* Neumorphic shadow recipes */
+  --nm-raised:    6px 6px 16px var(--nm-dark), -6px -6px 16px var(--nm-light);
+  --nm-raised-lg: 10px 10px 28px var(--nm-dark), -10px -10px 28px var(--nm-light);
+  --nm-raised-sm: 3px 3px 8px var(--nm-dark), -3px -3px 8px var(--nm-light);
+  --nm-inset:     inset 4px 4px 10px var(--nm-dark), inset -4px -4px 10px var(--nm-light);
+  --nm-inset-sm:  inset 2px 2px 6px var(--nm-dark), inset -2px -2px 6px var(--nm-light);
 }
 
-/* ─── Dark: "Midnight glass" ────────────────────────────── */
+/* ─── Dark: slate ───────────────────────────────────────── */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg-base:        oklch(18% 0.014 268);
-  --bg-glow-1:      oklch(60% 0.12 195 / 0.16);
-  --bg-glow-2:      oklch(55% 0.14 275 / 0.13);
+  --bg:        oklch(25% 0.012 265);
+  --nm-dark:   oklch(19% 0.01 265);
+  --nm-light:  oklch(31% 0.016 265);
 
-  --surface:        oklch(23% 0.014 268);
-  --surface-raised: oklch(27% 0.015 268);
-  --surface-sunken: oklch(15% 0.012 268);
+  --ink:       oklch(95% 0.005 260);
+  --ink-2:     oklch(76% 0.012 260);
+  --ink-3:     oklch(66% 0.013 260);
 
-  --glass:          oklch(42% 0.02 268 / 0.28);
-  --glass-strong:   oklch(46% 0.022 268 / 0.42);
-  --glass-border:   oklch(100% 0 0 / 0.14);
-  --glass-edge:     oklch(0% 0 0 / 0.35);
-  --glass-hi:       oklch(100% 0 0 / 0.12);
+  --accent:        oklch(74% 0.15 270);
+  --accent-hover:  oklch(80% 0.14 270);
+  --accent-ink:    oklch(22% 0.04 270);
+  --accent-soft:   oklch(74% 0.15 270 / 0.16);
+  --accent-ring:   oklch(74% 0.15 270 / 0.5);
 
-  --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.3), 0 12px 30px oklch(0% 0 0 / 0.42);
-  --shadow-2: 0 2px 8px oklch(0% 0 0 / 0.36), 0 22px 48px oklch(0% 0 0 / 0.52);
+  --danger:    oklch(72% 0.16 25);
 
-  --neu-hi:         oklch(34% 0.015 268 / 0.9);
-  --neu-lo:         oklch(8% 0.01 268 / 0.7);
+  --hairline:  oklch(100% 0 0 / 0.07);
+  --code-ink:  oklch(82% 0.04 270);
 
-  --text:           oklch(96% 0.005 250);
-  --text-secondary: oklch(78% 0.012 255);
-  --text-muted:     oklch(68% 0.012 255);
-  --text-on-accent: oklch(16% 0.02 255);
-
-  --accent:         oklch(74% 0.13 195);
-  --accent-strong:  oklch(82% 0.13 195);
-  --accent-2:       oklch(70% 0.15 272);
-  --accent-soft:    oklch(74% 0.13 195 / 0.16);
-  --accent-ring:    oklch(74% 0.13 195 / 0.5);
-  --accent-gradient: linear-gradient(135deg, oklch(77% 0.14 195), oklch(71% 0.15 272));
-
-  --success:        oklch(72% 0.13 160);
-  --warning:        oklch(80% 0.14 75);
-  --danger:         oklch(72% 0.16 25);
-
-  --code-bg:        oklch(15% 0.012 268 / 0.7);
-  --code-text:      oklch(88% 0.008 250);
-  --code-accent:    oklch(76% 0.15 235);
-  --code-comment:   oklch(60% 0.012 250);
-
-  --border:         oklch(100% 0 0 / 0.10);
-  --border-strong:  oklch(100% 0 0 / 0.18);
-
-  --backdrop:       oklch(20% 0.014 268 / 0.6);
+  --nm-raised:    6px 6px 16px var(--nm-dark), -6px -6px 16px var(--nm-light);
+  --nm-raised-lg: 10px 10px 28px var(--nm-dark), -10px -10px 28px var(--nm-light);
+  --nm-raised-sm: 3px 3px 8px var(--nm-dark), -3px -3px 8px var(--nm-light);
+  --nm-inset:     inset 4px 4px 10px var(--nm-dark), inset -4px -4px 10px var(--nm-light);
+  --nm-inset-sm:  inset 2px 2px 6px var(--nm-dark), inset -2px -2px 6px var(--nm-light);
 }
 
-/* System preference when no explicit choice (mirrors dark) */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
     color-scheme: dark;
-    --bg-base: oklch(18% 0.014 268);
-    --bg-glow-1: oklch(60% 0.12 195 / 0.16);
-    --bg-glow-2: oklch(55% 0.14 275 / 0.13);
-    --surface: oklch(23% 0.014 268);
-    --surface-raised: oklch(27% 0.015 268);
-    --surface-sunken: oklch(15% 0.012 268);
-    --glass: oklch(42% 0.02 268 / 0.28);
-    --glass-strong: oklch(46% 0.022 268 / 0.42);
-    --glass-border: oklch(100% 0 0 / 0.14);
-    --glass-edge: oklch(0% 0 0 / 0.35);
-    --glass-hi: oklch(100% 0 0 / 0.12);
-    --shadow-1: 0 1px 2px oklch(0% 0 0 / 0.3), 0 12px 30px oklch(0% 0 0 / 0.42);
-    --shadow-2: 0 2px 8px oklch(0% 0 0 / 0.36), 0 22px 48px oklch(0% 0 0 / 0.52);
-    --neu-hi: oklch(34% 0.015 268 / 0.9);
-    --neu-lo: oklch(8% 0.01 268 / 0.7);
-    --text: oklch(96% 0.005 250);
-    --text-secondary: oklch(78% 0.012 255);
-    --text-muted: oklch(68% 0.012 255);
-    --text-on-accent: oklch(16% 0.02 255);
-    --accent: oklch(74% 0.13 195);
-    --accent-strong: oklch(82% 0.13 195);
-    --accent-2: oklch(70% 0.15 272);
-    --accent-soft: oklch(74% 0.13 195 / 0.16);
-    --accent-ring: oklch(74% 0.13 195 / 0.5);
-    --accent-gradient: linear-gradient(135deg, oklch(77% 0.14 195), oklch(71% 0.15 272));
-    --success: oklch(72% 0.13 160);
-    --warning: oklch(80% 0.14 75);
+    --bg: oklch(25% 0.012 265);
+    --nm-dark: oklch(19% 0.01 265);
+    --nm-light: oklch(31% 0.016 265);
+    --ink: oklch(95% 0.005 260);
+    --ink-2: oklch(76% 0.012 260);
+    --ink-3: oklch(66% 0.013 260);
+    --accent: oklch(74% 0.15 270);
+    --accent-hover: oklch(80% 0.14 270);
+    --accent-ink: oklch(22% 0.04 270);
+    --accent-soft: oklch(74% 0.15 270 / 0.16);
+    --accent-ring: oklch(74% 0.15 270 / 0.5);
     --danger: oklch(72% 0.16 25);
-    --code-bg: oklch(15% 0.012 268 / 0.7);
-    --code-text: oklch(88% 0.008 250);
-    --code-accent: oklch(76% 0.15 235);
-    --code-comment: oklch(60% 0.012 250);
-    --border: oklch(100% 0 0 / 0.10);
-    --border-strong: oklch(100% 0 0 / 0.18);
-    --backdrop: oklch(20% 0.014 268 / 0.6);
+    --hairline: oklch(100% 0 0 / 0.07);
+    --code-ink: oklch(82% 0.04 270);
+    --nm-raised: 6px 6px 16px var(--nm-dark), -6px -6px 16px var(--nm-light);
+    --nm-raised-lg: 10px 10px 28px var(--nm-dark), -10px -10px 28px var(--nm-light);
+    --nm-raised-sm: 3px 3px 8px var(--nm-dark), -3px -3px 8px var(--nm-light);
+    --nm-inset: inset 4px 4px 10px var(--nm-dark), inset -4px -4px 10px var(--nm-light);
+    --nm-inset-sm: inset 2px 2px 6px var(--nm-dark), inset -2px -2px 6px var(--nm-light);
   }
 }
 
-/* Honor reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
-  }
-}
-
-/* Honor reduced transparency (HIG accessibility): glass becomes solid */
-@media (prefers-reduced-transparency: reduce) {
-  :root {
-    --glass: var(--surface);
-    --glass-strong: var(--surface-raised);
-    --backdrop: var(--surface);
-    --glass-blur: 0px;
   }
 }
