@@ -33,10 +33,10 @@ With Homebrew:
 brew install appautomaton/tap/docker-for-apple-container
 ```
 
-With pip:
+With uv:
 
 ```bash
-pip install docker-for-apple-container
+uv tool install docker-for-apple-container
 ```
 
 From source, symlink the launcher onto your PATH:

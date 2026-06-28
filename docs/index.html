@@ -88,9 +88,9 @@
         "@type": "HowTo",
         "name": "Install docker-for-apple-container on macOS",
         "totalTime": "PT2M",
-        "supply": ["Homebrew", "Apple container 1.0.0"],
+        "supply": ["Homebrew or uv", "Apple container 1.0.0"],
         "step": [
-          { "@type": "HowToStep", "position": 1, "name": "Install", "text": "Run brew install appautomaton/tap/docker-for-apple-container." },
+          { "@type": "HowToStep", "position": 1, "name": "Install", "text": "Install with Homebrew (brew install appautomaton/tap/docker-for-apple-container) or with uv (uv tool install docker-for-apple-container). Either one puts the docker command on your PATH." },
           { "@type": "HowToStep", "position": 2, "name": "Start Apple container", "text": "Run container system start and verify the apiserver is running with container system status." },
           { "@type": "HowToStep", "position": 3, "name": "Use docker", "text": "Run any supported docker command. The shim translates it to Apple container and fails loudly on anything it cannot verify." }
         ]
@@ -349,9 +349,11 @@
           <article class="step reveal">
             <div class="step__n" aria-hidden="true"></div>
             <div>
-              <h3>Install with Homebrew</h3>
-              <p>The quickest path. Adds <code>docker</code> to your PATH.</p>
-              <pre><code><span class="tok-prompt">$ </span><span class="tok-cmd">brew</span> install appautomaton/tap/docker-for-apple-container</code></pre>
+              <h3>Install</h3>
+              <p>Homebrew or <code>uv</code>, whichever you have. Either one puts <code>docker</code> on your PATH.</p>
+              <pre><code><span class="tok-prompt">$ </span><span class="tok-cmd">brew</span> install appautomaton/tap/docker-for-apple-container
+<span class="tok-prompt"># or with uv</span>
+<span class="tok-prompt">$ </span><span class="tok-cmd">uv</span> tool install docker-for-apple-container</code></pre>
             </div>
           </article>
           <article class="step reveal">

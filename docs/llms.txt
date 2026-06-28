@@ -11,6 +11,7 @@ docker-for-apple-container is a stateless translator: it maps each supported `do
 - [README (canonical, source-of-truth)](https://github.com/appautomaton/docker-for-apple-container/blob/main/README.md): full command contract, compose design, caveats.
 - [GitHub repository](https://github.com/appautomaton/docker-for-apple-container)
 - [Homebrew tap](https://github.com/appautomaton/homebrew-tap): `brew install appautomaton/tap/docker-for-apple-container`
+- [PyPI package](https://pypi.org/project/docker-for-apple-container/): `uv tool install docker-for-apple-container`
 - [Releases](https://github.com/appautomaton/docker-for-apple-container/releases)
 - [LICENSE (MIT)](https://github.com/appautomaton/docker-for-apple-container/blob/main/LICENSE)
 
