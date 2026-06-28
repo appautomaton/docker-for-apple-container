@@ -1288,7 +1288,7 @@ def _follow_prefixed(label: str, name: str) -> None:
 
 
 def _warn(message: str) -> None:
-    print(f"container-docker-shim: compose: {message}", file=sys.stderr)
+    print(f"docker-for-apple-container: compose: {message}", file=sys.stderr)
 
 
 _USAGE = (

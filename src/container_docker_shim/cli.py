@@ -23,7 +23,7 @@ def _container_bin() -> str:
 
 def _debug(message: str) -> None:
     if os.environ.get("CONTAINER_DOCKER_SHIM_DEBUG"):
-        print(f"container-docker-shim debug: {message}", file=sys.stderr)
+        print(f"docker-for-apple-container debug: {message}", file=sys.stderr)
 
 
 def _run_container_capture(args: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -65,7 +65,7 @@ def _print_completed(result: subprocess.CompletedProcess[str]) -> None:
 
 
 def _die(message: str, code: int = 1) -> int:
-    print(f"container-docker-shim: {message}", file=sys.stderr)
+    print(f"docker-for-apple-container: {message}", file=sys.stderr)
     return code
 
 
@@ -234,9 +234,9 @@ def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
             or item.get("finishedAt")
             or item.get("FinishedAt")
             # Apple container 1.0.0 records no finish time on a stopped
-            # container (only creationDate/startedDate). Fall back so Hermes'
-            # orphan reaper sees a real, parseable, past timestamp — not the
-            # zero-value it reads as "never finished" and refuses to reap,
+            # container (only creationDate/startedDate). Fall back so an
+            # orphan reaper sees a real, parseable, past timestamp instead of
+            # the zero-value it reads as "never finished" and refuses to reap,
             # which would leak every exited container forever.
             or _deep_get(item, "status", "startedDate")
             or _deep_get(item, "configuration", "creationDate")
@@ -1018,7 +1018,7 @@ def cmd_exec(argv: list[str]) -> int:
 
 
 def cmd_create(argv: list[str]) -> int:
-    # Hermes probes storage-opt support; Docker returns 125 when the driver lacks it.
+    # Some callers probe storage-opt support. Docker returns 125 when the driver lacks it.
     if "--storage-opt" in argv or any(arg.startswith("--storage-opt=") for arg in argv):
         return _die("Docker --storage-opt probe is unsupported by Apple container", 125)
     opts, image, command, detach, name = _parse_run_options(argv)
@@ -1264,7 +1264,7 @@ def cmd_proxy(container_args: list[str]) -> int:
 
 
 def print_help() -> None:
-    print("container-docker-shim: Docker CLI subset over Apple container")
+    print("docker-for-apple-container: Docker CLI subset over Apple container")
     print()
     print("Translated:  version, info, build, run, create, ps, inspect,")
     print("             image inspect, start, exec, stop, restart, rm, logs, cp,")
