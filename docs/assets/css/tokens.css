@@ -1,13 +1,15 @@
 /* tokens.css - design tokens for the "Precision instrument" system
  *
  * Refined neumorphism: one calm surface that elements extrude from, subtle dual
- * shadows plus a hairline, a single solid indigo accent, and zero gradients.
- * OKLCH throughout. Light and dark are tuned independently.
+ * shadows plus a hairline, a single solid moss accent, and zero gradients.
+ * The palette is a full surface system: surface, shadows, ink and hairline all
+ * carry the accent's temperature. OKLCH throughout; light and dark tuned
+ * independently. Type is Fontshare (ITF): Clash Display over Satoshi.
  */
 :root {
   /* Type */
-  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
-  --font-body: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
+  --font-display: "Clash Display", system-ui, -apple-system, sans-serif;
+  --font-body: "Satoshi", system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
 
   /* Fluid type scale */
@@ -52,89 +54,95 @@
   color-scheme: light dark;
 }
 
-/* ─── Light: soft graphite ──────────────────────────────── */
+/* ─── Light: moss on warm-green stone ───────────────────── */
 :root, :root[data-theme="light"] {
   color-scheme: light;
 
-  --bg:        oklch(93.5% 0.004 262);          /* the neumorphic surface */
-  --nm-dark:   oklch(85% 0.008 262);            /* bottom-right shadow */
-  --nm-light:  oklch(99.5% 0.001 262);          /* top-left highlight */
+  /* Wider light/dark deltas than before (was ~6-8% lightness, nearly
+     invisible once rendered) — the extrusion needs to actually read. */
+  --bg:        oklch(91% 0.008 140);            /* the neumorphic surface */
+  --nm-dark:   oklch(72% 0.016 140);            /* bottom-right shadow */
+  --nm-light:  oklch(99.5% 0.004 140);          /* top-left highlight */
 
-  --ink:       oklch(27% 0.02 264);
-  --ink-2:     oklch(44% 0.016 264);
-  --ink-3:     oklch(51% 0.014 264);
+  --ink:       oklch(24% 0.014 155);
+  --ink-2:     oklch(42% 0.013 155);
+  --ink-3:     oklch(50% 0.012 155);
 
-  --accent:        oklch(50% 0.17 268);
-  --accent-hover:  oklch(44% 0.18 268);
-  --accent-ink:    oklch(99% 0.01 268);
-  --accent-soft:   oklch(50% 0.17 268 / 0.12);
-  --accent-ring:   oklch(50% 0.17 268 / 0.5);
+  --accent:        oklch(50% 0.115 145);
+  --accent-hover:  oklch(44% 0.125 145);
+  --accent-ink:    oklch(98.5% 0.012 145);
+  --accent-soft:   oklch(50% 0.115 145 / 0.14);
+  --accent-ring:   oklch(50% 0.115 145 / 0.5);
 
   --danger:    oklch(53% 0.19 25);
 
-  --hairline:  oklch(45% 0.02 264 / 0.10);
-  --code-ink:  oklch(34% 0.03 268);
+  --hairline:  oklch(35% 0.02 150 / 0.10);
+  --code-ink:  oklch(33% 0.04 148);
 
-  /* Neumorphic shadow recipes */
-  --nm-raised:    6px 6px 16px var(--nm-dark), -6px -6px 16px var(--nm-light);
-  --nm-raised-lg: 10px 10px 28px var(--nm-dark), -10px -10px 28px var(--nm-light);
-  --nm-raised-sm: 3px 3px 8px var(--nm-dark), -3px -3px 8px var(--nm-light);
-  --nm-inset:     inset 4px 4px 10px var(--nm-dark), inset -4px -4px 10px var(--nm-light);
-  --nm-inset-sm:  inset 2px 2px 6px var(--nm-dark), inset -2px -2px 6px var(--nm-light);
+  /* Neumorphic shadow recipes — larger offset/blur so the shadow has
+     presence instead of reading as a faint gradient. */
+  --nm-raised:    7px 7px 18px var(--nm-dark), -7px -7px 18px var(--nm-light);
+  --nm-raised-lg: 12px 12px 32px var(--nm-dark), -12px -12px 32px var(--nm-light);
+  --nm-raised-sm: 4px 4px 10px var(--nm-dark), -4px -4px 10px var(--nm-light);
+  --nm-inset:     inset 5px 5px 12px var(--nm-dark), inset -5px -5px 12px var(--nm-light);
+  --nm-inset-sm:  inset 3px 3px 7px var(--nm-dark), inset -3px -3px 7px var(--nm-light);
 }
 
-/* ─── Dark: slate ───────────────────────────────────────── */
+/* ─── Dark: moss on deep forest slate ───────────────────── */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --bg:        oklch(25% 0.012 265);
-  --nm-dark:   oklch(19% 0.01 265);
-  --nm-light:  oklch(31% 0.016 265);
+  /* Dark mode is the harder case for neumorphism — human contrast
+     sensitivity in low-luminance ranges is worse, so the delta has to be
+     wider here than in light mode just to read the same. */
+  --bg:        oklch(23% 0.014 150);
+  --nm-dark:   oklch(10% 0.012 150);
+  --nm-light:  oklch(36% 0.018 148);
 
-  --ink:       oklch(95% 0.005 260);
-  --ink-2:     oklch(76% 0.012 260);
-  --ink-3:     oklch(66% 0.013 260);
+  --ink:       oklch(95% 0.006 150);
+  --ink-2:     oklch(78% 0.012 150);
+  --ink-3:     oklch(66% 0.012 150);
 
-  --accent:        oklch(74% 0.15 270);
-  --accent-hover:  oklch(80% 0.14 270);
-  --accent-ink:    oklch(22% 0.04 270);
-  --accent-soft:   oklch(74% 0.15 270 / 0.16);
-  --accent-ring:   oklch(74% 0.15 270 / 0.5);
+  --accent:        oklch(74% 0.13 148);
+  --accent-hover:  oklch(80% 0.12 148);
+  --accent-ink:    oklch(19% 0.035 148);
+  --accent-soft:   oklch(74% 0.13 148 / 0.18);
+  --accent-ring:   oklch(74% 0.13 148 / 0.5);
 
   --danger:    oklch(72% 0.16 25);
 
-  --hairline:  oklch(100% 0 0 / 0.07);
-  --code-ink:  oklch(82% 0.04 270);
+  --hairline:  oklch(95% 0.018 150 / 0.09);
+  --code-ink:  oklch(84% 0.045 148);
 
-  --nm-raised:    6px 6px 16px var(--nm-dark), -6px -6px 16px var(--nm-light);
-  --nm-raised-lg: 10px 10px 28px var(--nm-dark), -10px -10px 28px var(--nm-light);
-  --nm-raised-sm: 3px 3px 8px var(--nm-dark), -3px -3px 8px var(--nm-light);
-  --nm-inset:     inset 4px 4px 10px var(--nm-dark), inset -4px -4px 10px var(--nm-light);
-  --nm-inset-sm:  inset 2px 2px 6px var(--nm-dark), inset -2px -2px 6px var(--nm-light);
+  --nm-raised:    7px 7px 18px var(--nm-dark), -7px -7px 18px var(--nm-light);
+  --nm-raised-lg: 12px 12px 32px var(--nm-dark), -12px -12px 32px var(--nm-light);
+  --nm-raised-sm: 4px 4px 10px var(--nm-dark), -4px -4px 10px var(--nm-light);
+  --nm-inset:     inset 5px 5px 12px var(--nm-dark), inset -5px -5px 12px var(--nm-light);
+  --nm-inset-sm:  inset 3px 3px 7px var(--nm-dark), inset -3px -3px 7px var(--nm-light);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
     color-scheme: dark;
-    --bg: oklch(25% 0.012 265);
-    --nm-dark: oklch(19% 0.01 265);
-    --nm-light: oklch(31% 0.016 265);
-    --ink: oklch(95% 0.005 260);
-    --ink-2: oklch(76% 0.012 260);
-    --ink-3: oklch(66% 0.013 260);
-    --accent: oklch(74% 0.15 270);
-    --accent-hover: oklch(80% 0.14 270);
-    --accent-ink: oklch(22% 0.04 270);
-    --accent-soft: oklch(74% 0.15 270 / 0.16);
-    --accent-ring: oklch(74% 0.15 270 / 0.5);
+    --bg: oklch(23% 0.014 150);
+    --nm-dark: oklch(10% 0.012 150);
+    --nm-light: oklch(36% 0.018 148);
+    --ink: oklch(95% 0.006 150);
+    --ink-2: oklch(78% 0.012 150);
+    --ink-3: oklch(66% 0.012 150);
+    --accent: oklch(74% 0.13 148);
+    --accent-hover: oklch(80% 0.12 148);
+    --accent-ink: oklch(19% 0.035 148);
+    --accent-soft: oklch(74% 0.13 148 / 0.18);
+    --accent-ring: oklch(74% 0.13 148 / 0.5);
     --danger: oklch(72% 0.16 25);
-    --hairline: oklch(100% 0 0 / 0.07);
-    --code-ink: oklch(82% 0.04 270);
-    --nm-raised: 6px 6px 16px var(--nm-dark), -6px -6px 16px var(--nm-light);
-    --nm-raised-lg: 10px 10px 28px var(--nm-dark), -10px -10px 28px var(--nm-light);
-    --nm-raised-sm: 3px 3px 8px var(--nm-dark), -3px -3px 8px var(--nm-light);
-    --nm-inset: inset 4px 4px 10px var(--nm-dark), inset -4px -4px 10px var(--nm-light);
-    --nm-inset-sm: inset 2px 2px 6px var(--nm-dark), inset -2px -2px 6px var(--nm-light);
+    --hairline: oklch(95% 0.018 150 / 0.09);
+    --code-ink: oklch(84% 0.045 148);
+    --nm-raised: 7px 7px 18px var(--nm-dark), -7px -7px 18px var(--nm-light);
+    --nm-raised-lg: 12px 12px 32px var(--nm-dark), -12px -12px 32px var(--nm-light);
+    --nm-raised-sm: 4px 4px 10px var(--nm-dark), -4px -4px 10px var(--nm-light);
+    --nm-inset: inset 5px 5px 12px var(--nm-dark), inset -5px -5px 12px var(--nm-light);
+    --nm-inset-sm: inset 3px 3px 7px var(--nm-dark), inset -3px -3px 7px var(--nm-light);
   }
 }
 

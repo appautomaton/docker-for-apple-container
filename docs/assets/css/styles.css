@@ -26,12 +26,12 @@ body {
 
 /* ─────────────────────── Typography ────────────────────── */
 h1, h2, h3, h4 { color: var(--ink); text-wrap: balance; line-height: 1.05; }
-/* Serif (Fraunces) is reserved for the big display moments; hierarchy comes
-   from weight, not just color. Everything else stays in the grotesque. */
-h1, h2 { font-family: var(--font-display); font-optical-sizing: auto; }
+/* Clash Display is reserved for the big display moments; everything else
+   stays in Satoshi. Hierarchy comes from weight, not just color. */
+h1, h2 { font-family: var(--font-display); }
 h3, h4 { font-family: var(--font-body); }
-h1 { font-size: var(--text-2xl); font-weight: 400; letter-spacing: -0.018em; line-height: 1.0; }
-h2 { font-size: var(--text-xl); font-weight: 500; letter-spacing: -0.012em; }
+h1 { font-size: var(--text-2xl); font-weight: 600; letter-spacing: -0.02em; line-height: 1.0; }
+h2 { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.015em; }
 h3 { font-size: var(--text-md); font-weight: 600; letter-spacing: -0.01em; }
 
 p { color: var(--ink-2); }
@@ -142,11 +142,24 @@ main { padding-bottom: var(--section-y); }
   letter-spacing: -0.02em; color: var(--ink); margin-right: auto;
 }
 .brand:hover { color: var(--ink); }
+/* The mark: the dock — a macOS squircle port, open on the left, that the
+   Docker crate glides into and seats flush. The crate's authored position
+   is the seated state, so when the global reduced-motion rule disables the
+   animation the mark rests docked. */
 .brand__mark {
-  width: 34px; height: 34px; border-radius: 10px;
-  display: grid; place-items: center; flex-shrink: 0;
-  background: var(--bg); color: var(--accent); box-shadow: var(--nm-raised-sm);
-  font-size: 16px;
+  width: 36px; height: 36px; flex-shrink: 0; display: grid; place-items: center;
+  background: var(--bg); border-radius: 10px; box-shadow: var(--nm-raised-sm);
+}
+.brand__mark svg { display: block; width: 100%; height: 100%; }
+.mark-crate { animation: mark-dock 4.2s cubic-bezier(0.25, 0.9, 0.3, 1) infinite; }
+@keyframes mark-dock {
+  0%   { transform: translateX(-17px); opacity: 0; }
+  8%   { opacity: 1; }
+  30%  { transform: translateX(1.2px); }
+  40%  { transform: translateX(0); }
+  88%  { transform: translateX(0); opacity: 1; }
+  97%  { opacity: 0; }
+  100% { transform: translateX(-17px); opacity: 0; }
 }
 .brand__name b { color: var(--accent); font-weight: 600; padding-inline: 0.1em; }
 
@@ -233,7 +246,10 @@ main { padding-bottom: var(--section-y); }
 .grid--2 { grid-template-columns: repeat(2, 1fr); }
 
 .card {
-  background: var(--bg); border-radius: var(--radius-lg); box-shadow: var(--nm-raised);
+  background: var(--bg); border-radius: var(--radius-lg);
+  /* Raised shadow does the elevation work; the 1px inset hairline is just an
+     edge-legibility assist so the boundary still reads at low contrast. */
+  box-shadow: var(--nm-raised), inset 0 0 0 1px var(--hairline);
   padding: var(--pad-card);
   display: flex; flex-direction: column;
   transition: transform var(--dur-base) var(--ease), box-shadow var(--dur-base) var(--ease);
@@ -241,14 +257,15 @@ main { padding-bottom: var(--section-y); }
 .card__mark {
   width: 40px; height: 40px; border-radius: 12px; margin-bottom: var(--space-4);
   display: grid; place-items: center; flex-shrink: 0;
-  background: var(--bg); box-shadow: var(--nm-inset-sm);
-  color: var(--accent); font-family: var(--font-body); font-weight: 600; font-size: var(--text-md);
+  background: radial-gradient(circle at 32% 28%, var(--accent-soft), transparent 70%), var(--bg);
+  box-shadow: var(--nm-inset-sm);
+  color: var(--accent); font-family: var(--font-body); font-weight: 700; font-size: var(--text-md);
 }
-.card h3 { margin-bottom: var(--space-2); }
+.card h3 { margin-bottom: var(--space-2); font-weight: 700; }
 .card p { font-size: var(--text-sm); color: var(--ink-2); line-height: 1.55; }
 .card p code { font-size: 0.92em; }
 @media (hover: hover) {
-  .card:hover { transform: translateY(-4px); box-shadow: var(--nm-raised-lg); }
+  .card:hover { transform: translateY(-4px); box-shadow: var(--nm-raised-lg), inset 0 0 0 1px var(--hairline); }
 }
 
 /* Command tier card */
@@ -265,19 +282,24 @@ main { padding-bottom: var(--section-y); }
 .tier__more { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--hairline); }
 .tier__more > summary {
   list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: var(--space-2);
-  font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.04em; color: var(--accent);
-  min-height: 28px;
+  font-family: var(--font-mono); font-size: var(--text-xs); letter-spacing: 0.04em; color: var(--ink-2);
+  padding: 0.45em 0.9em; border-radius: var(--radius-full);
+  background: var(--bg); box-shadow: var(--nm-raised-sm);
+  transition: box-shadow var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
+.tier__more > summary:hover { color: var(--accent); transform: translateY(-1px); }
 .tier__more > summary::-webkit-details-marker { display: none; }
-.tier__more > summary::after { content: "+"; font-weight: 700; }
+.tier__more > summary::after { content: "+"; font-weight: 700; color: var(--accent); }
+.tier__more[open] > summary { box-shadow: var(--nm-inset-sm); }
 .tier__more[open] > summary::after { content: "−"; }
-.tier__more[open] > summary { color: var(--ink-3); }
+.tier__more[open] > summary:hover { transform: none; }
 .tier__more .cmd-list { margin-top: var(--space-3); }
 
 /* ───────────────────── Flow (how it works) ─────────────── */
 .flow { display: flex; align-items: stretch; gap: var(--space-4); margin-top: var(--space-2); }
 .flow__node {
-  flex: 1; background: var(--bg); border-radius: var(--radius-md); box-shadow: var(--nm-raised);
+  flex: 1; background: var(--bg); border-radius: var(--radius-md);
+  box-shadow: var(--nm-raised), inset 0 0 0 1px var(--hairline);
   padding: var(--space-5); text-align: center;
 }
 .flow__node.is-dest { box-shadow: 0 10px 28px var(--accent-soft), inset 0 0 0 1.5px var(--accent); }
@@ -324,7 +346,7 @@ pre code { background: none; box-shadow: none; padding: 0; color: inherit; font-
 
 /* ─────────────────────────── FAQ ───────────────────────── */
 .faq { display: flex; flex-direction: column; gap: var(--space-4); }
-.faq__item { background: var(--bg); border-radius: var(--radius-md); box-shadow: var(--nm-raised); }
+.faq__item { background: var(--bg); border-radius: var(--radius-md); box-shadow: var(--nm-raised), inset 0 0 0 1px var(--hairline); }
 .faq__item > summary {
   list-style: none; cursor: pointer; padding: var(--space-5) var(--pad-card);
   font-family: var(--font-body); font-weight: 500; font-size: var(--text-md);
