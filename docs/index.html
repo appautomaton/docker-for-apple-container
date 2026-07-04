@@ -17,13 +17,13 @@
     })();
   </script>
 
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="preconnect" href="https://api.fontshare.com" />
+  <link rel="preconnect" href="https://cdn.fontshare.com" crossorigin />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'" />
+  <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=clash-display@600&f[]=satoshi@400,500,700&display=swap" media="print" onload="this.media='all'" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@latest/index.css" media="print" onload="this.media='all'" />
   <noscript>
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" />
+    <link rel="stylesheet" href="https://api.fontshare.com/v2/css?f[]=clash-display@600&f[]=satoshi@400,500,700&display=swap" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/geist-mono@latest/index.css" />
   </noscript>
 
@@ -122,7 +122,16 @@
   <header class="site-header">
     <div class="container site-header__inner">
       <a class="brand" href="./">
-        <span class="brand__mark" aria-hidden="true">↦</span>
+        <span class="brand__mark" aria-hidden="true">
+          <!-- The dock: a macOS squircle port, open on the left; the Docker
+               crate glides in and seats flush. Your container, docked
+               natively on the Mac. -->
+          <svg viewBox="0 0 48 48" fill="none">
+            <path d="M8 18 Q8 8 18 8 H30 Q40 8 40 18 V30 Q40 40 30 40 H18 Q8 40 8 30"
+                  stroke="var(--ink)" stroke-width="3.4" stroke-linecap="round"/>
+            <rect class="mark-crate" x="8.5" y="19" width="10" height="10" rx="2" fill="var(--accent)"/>
+          </svg>
+        </span>
         <span class="brand__name">docker<b>↦</b>container</span>
       </a>
 

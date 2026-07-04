@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="8" fill="#3f3fce"/>
-  <g stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
-    <path d="M9 8.5 V23.5"/>
-    <path d="M9 16 H22.5"/>
-    <path d="M18 11.5 L22.5 16 L18 20.5"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <!-- The dock, static frame: the Docker crate seated in the open port.
+       Your container, docked natively on the Mac. -->
+  <rect width="48" height="48" rx="15" fill="#327437"/>
+  <path d="M12 20 Q12 11 21 11 H29 Q38 11 38 20 V28 Q38 37 29 37 H21 Q12 37 12 28"
+        stroke="#f5fcf5" stroke-width="4.2" stroke-linecap="round" fill="none"/>
+  <rect x="12.5" y="19" width="10.5" height="10" rx="2.4" fill="#f5fcf5"/>
 </svg>
