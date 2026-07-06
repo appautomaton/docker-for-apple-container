@@ -50,6 +50,7 @@ name work unchanged.
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import sys
 import threading
@@ -967,15 +968,16 @@ def _ensure_named_volume(resource: str, project: str) -> None:
 _HOST_ALIASES = "host.docker.internal gateway.docker.internal"
 
 
-def _cp_hosts_fallback(name: str, lines: list[str]) -> bool:
+def _cp_hosts_fallback(name: str, lines: list[str], managed: list[str]) -> bool:
     """Inject hosts lines via `container cp` when the image has no shell.
 
     `container cp` rides the guest agent, so it works on running distroless
     containers where `exec sh` cannot (e.g. cloudflare/cloudflared). Copy the
-    container's /etc/hosts out, append what's missing, copy it back. Only
-    suitable post-start — but a shell-less image can't take the boot-time
-    wrapper either, so this is its one injection path. Returns True on
-    success.
+    container's /etc/hosts out, drop lines mentioning any ``managed`` name
+    (same replace-not-append semantics as the exec path), append the fresh
+    ``lines``, copy it back. Only suitable post-start — but a shell-less image
+    can't take the boot-time wrapper either, so this is its one injection
+    path. Returns True on success.
     """
     import tempfile
 
@@ -985,17 +987,13 @@ def _cp_hosts_fallback(name: str, lines: list[str]) -> bool:
             return False
         try:
             with open(local, encoding="utf-8") as fh:
-                current = fh.read()
+                current = fh.read().splitlines()
         except OSError:
             return False
-        existing = {line.strip() for line in current.splitlines()}
-        missing = [line for line in lines if line not in existing]
-        if not missing:
-            return True
-        with open(local, "a", encoding="utf-8") as fh:
-            if current and not current.endswith("\n"):
-                fh.write("\n")
-            fh.write("\n".join(missing) + "\n")
+        managed_words = set(managed)
+        kept = [l for l in current if not (set(l.split()) & managed_words)]
+        with open(local, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(kept + lines) + "\n")
         return _run_container_capture(["cp", local, f"{name}:/etc/hosts"]).returncode == 0
 
 
@@ -1132,43 +1130,55 @@ def _inject_etc_hosts(
        for single-service projects.
 
     All writes land in **each container's ephemeral /etc/hosts**, discarded on
-    removal — the macOS host's /etc/hosts is never read or written. Each line is
-    appended only if not already present (idempotent across re-runs, and with
-    the boot-time wrapper's lines). If the `exec` fails (no shell in the image,
-    or the container already exited), that one container is skipped with a
-    warning rather than failing the whole `up`.
+    removal — the macOS host's /etc/hosts is never read or written. Managed
+    names are **replaced, not appended**: a partial ``up <service>`` gives the
+    recreated container a new IP, and the resolver takes the *first* matching
+    line, so stale entries in its peers must be dropped, not shadowed. If the
+    `exec` fails (no shell in the image), a `container cp` rewrite is tried;
+    a container that is not running (partial up) is skipped silently.
 
+    Callers must pass the **whole project's services** — peer names come from
+    every running container, not just the ones a partial `up` touched.
     ``net_info`` carries addresses already inspected by the caller (keyed by
     container name); anything missing is inspected here.
     """
     info: dict[str, tuple[str | None, str | None]] = dict(net_info or {})
+    named: list[tuple[Service, str]] = []
     peers: list[tuple[str, str]] = []
     for service in services:
         name = service.container_name or f"{project.name}-{service.name}-1"
         if name not in info:
             info[name] = _container_net(name)
+        named.append((service, name))
         ip = info[name][0]
         if ip:
             peers.append((service.name, ip))
 
     peer_lines = [f"{ip} {svc}" for svc, ip in peers] if len(peers) >= 2 else []
 
-    for service in services:
-        name = service.container_name or f"{project.name}-{service.name}-1"
-        _ip, gateway = info[name]
+    for service, name in named:
+        ip, gateway = info[name]
+        if ip is None:
+            continue  # not running — nothing to write into
         lines = list(peer_lines)
         if gateway:
             lines.append(f"{gateway} {_HOST_ALIASES}")
         if not lines:
             continue
-        # Append each line only if an identical one isn't already there, so a
-        # re-`up` (or any re-injection) never duplicates entries.
-        script = "\n".join(
-            f"grep -qxF {q} /etc/hosts || printf '%s\\n' {q} >> /etc/hosts"
-            for q in (shlex.quote(line) for line in lines)
+        managed = [word for line in lines for word in line.split()[1:]]
+        pattern = "(^|[[:space:]])(" + "|".join(re.escape(w) for w in managed) + ")([[:space:]]|$)"
+        # Rewrite: strip every line mentioning a managed name, append fresh
+        # ones. grep -v exiting 1 (nothing left) is fine — appends still run.
+        script = (
+            'tmp="$(mktemp)"; '
+            f'grep -vE {shlex.quote(pattern)} /etc/hosts > "$tmp"; '
+            + "; ".join(
+                f"printf '%s\\n' {shlex.quote(line)} >> \"$tmp\"" for line in lines
+            )
+            + '; cat "$tmp" > /etc/hosts; rm -f "$tmp"'
         )
         result = _run_container_capture(["exec", name, "sh", "-c", script])
-        if result.returncode != 0 and not _cp_hosts_fallback(name, lines):
+        if result.returncode != 0 and not _cp_hosts_fallback(name, lines, managed):
             _warn(
                 f"could not write /etc/hosts in {name} (no shell in image, or "
                 "container exited before injection) — service/host-gateway "
@@ -1286,7 +1296,10 @@ def cmd_up(project: Project, *, detach: bool, build: bool, only: list[str], no_b
             ip_by_service[service.name] = ip
         gateway_ip = gateway_ip or gateway
 
-    _inject_etc_hosts(project, started, net_info)
+    # Whole project, not just `started`: a partial `up <svc>` must give the
+    # fresh container ALL peer names, and rewrite the recreated service's new
+    # address into every already-running peer.
+    _inject_etc_hosts(project, project.topo_sorted(), net_info)
 
     if detach:
         return 0

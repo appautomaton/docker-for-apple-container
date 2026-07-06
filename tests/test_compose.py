@@ -436,8 +436,9 @@ class ComposeE2ETests(unittest.TestCase):
 
     def test_up_injects_host_docker_internal(self) -> None:
         # Multi-service /etc/hosts writes must also publish the host-gateway
-        # aliases (Docker Desktop parity), pointing at the network gateway, and
-        # be guarded so a re-run never duplicates the entry.
+        # aliases (Docker Desktop parity), pointing at the network gateway,
+        # via rewrite (strip managed names, append fresh) so re-runs and
+        # partial ups never duplicate or shadow entries.
         self.write_compose(
             """
             services:
@@ -453,7 +454,7 @@ class ComposeE2ETests(unittest.TestCase):
         for entry in hosts_writes:
             script = " ".join(entry["cmd"])
             self.assertIn("192.168.65.1 host.docker.internal gateway.docker.internal", script)
-            self.assertIn("grep -qxF", script)  # idempotent guard
+            self.assertIn("grep -vE", script)  # replace semantics: strip managed names first
 
     def test_single_service_still_gets_host_gateway(self) -> None:
         # A lone service has no peers to resolve, but must still get
@@ -508,6 +509,34 @@ class ComposeE2ETests(unittest.TestCase):
         # `image inspect`) + the compose command — string form shell-split,
         # never sh -c wrapped, replacing the image CMD.
         self.assertEqual(web["cmd"][2:], ["sh", "/entry", "--flag", "on"])
+
+    def test_partial_up_sees_whole_project_and_refreshes_peers(self) -> None:
+        # `up -d web` after a full up: the recreated web (new IP) must still
+        # learn db's name (peers come from the whole project, not the started
+        # subset), and db must be re-injected with web's NEW address — the
+        # resolver takes the first match, so stale lines must be replaced,
+        # not shadowed. This is the exact failure that broke a live tunnel
+        # sidecar restart (fresh container knew no peers at all).
+        self.write_compose(
+            """
+            services:
+              web:
+                image: nginx:latest
+              db:
+                image: postgres:16
+            """
+        )
+        self.assertEqual(self.docker("compose", "up", "-d").returncode, 0)
+        result = self.docker("compose", "up", "-d", "web")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.load_state()
+        web_ip = state["containers"]["demo-web-1"]["status"]["networks"][0]["ipv4Address"].split("/")[0]
+        partial_writes = [e for e in state["exec_log"] if "/etc/hosts" in " ".join(e["cmd"])][-2:]
+        by_target = {e["container"]: " ".join(e["cmd"]) for e in partial_writes}
+        self.assertIn("demo-web-1", by_target)
+        self.assertIn("demo-db-1", by_target)
+        self.assertIn(" db", by_target["demo-web-1"])       # fresh web knows db
+        self.assertIn(f"{web_ip} web", by_target["demo-db-1"])  # db gets web's NEW ip
 
     def test_shell_less_image_gets_hosts_via_cp_fallback(self) -> None:
         # A distroless image (no /bin/sh — e.g. cloudflare/cloudflared) can't
