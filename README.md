@@ -160,9 +160,11 @@ read the compose file.
   mirrors Docker Desktop (which adds these names automatically on macOS/Windows),
   so a service that dials the host by that name (for example
   `http://host.docker.internal:8317`) works unchanged. The gateway is read
-  per-network from `container inspect`, not hardcoded. Injection is idempotent
-  and skipped with a warning on shell-less images (e.g. distroless). It is
-  **compose-only**. Bare `docker run` is left alone, since injecting into a
+  per-network from `container inspect`, not hardcoded. Injection is idempotent.
+  On shell-less images (e.g. distroless, cloudflare/cloudflared) where `exec sh`
+  is impossible, it falls back to `container cp`: /etc/hosts is copied out,
+  merged, and copied back via the guest agent — only a container that exits
+  before injection lands is skipped, with a warning. It is **compose-only**. Bare `docker run` is left alone, since injecting into a
   possibly short-lived container would race its exit (Apple has no `--add-host`
   flag to set it at creation, so it must be done via a post-start `exec`).
 - **Named volumes** map onto Apple-native volumes (`container volume create`),

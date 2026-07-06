@@ -139,8 +139,22 @@ if a[:1] == ["exec"]:
     while i < len(a) and a[i].startswith("-"):
         i += 2 if a[i] in ("-e","-w") else 1
     ident = a[i]; cmd = a[i+1:]
+    if ident in os.environ.get("FAKE_NO_SHELL", "").split(","):
+        print("no such executable: sh", file=sys.stderr); raise SystemExit(1)
     d["exec_log"].append({"container": ident, "cmd": cmd})
     save(d); raise SystemExit(0)
+
+if a[:1] in (["cp"], ["copy"]):
+    d = load(); src, dst = a[1], a[2]
+    if ":" in src:  # container -> local
+        ident, _, path = src.partition(":")
+        files = d["containers"].get(ident, {}).get("files", {})
+        Path(dst).write_text(files.get(path, "127.0.0.1 localhost\n"))
+    else:           # local -> container
+        ident, _, path = dst.partition(":")
+        d["containers"].setdefault(ident, {}).setdefault("files", {})[path] = Path(src).read_text()
+        save(d)
+    raise SystemExit(0)
 
 if a[:1] == ["logs"]:
     print("LOGS " + " ".join(x for x in a[1:] if not x.startswith("-")))
@@ -494,6 +508,32 @@ class ComposeE2ETests(unittest.TestCase):
         # `image inspect`) + the compose command — string form shell-split,
         # never sh -c wrapped, replacing the image CMD.
         self.assertEqual(web["cmd"][2:], ["sh", "/entry", "--flag", "on"])
+
+    def test_shell_less_image_gets_hosts_via_cp_fallback(self) -> None:
+        # A distroless image (no /bin/sh — e.g. cloudflare/cloudflared) can't
+        # take exec injection or the boot wrapper. The shim must fall back to
+        # `container cp`: read /etc/hosts out, merge, write it back.
+        self.write_compose(
+            """
+            services:
+              edge:
+                image: distroless/edge:latest
+                x-shim-boot-hosts: false
+                depends_on: [app]
+              app:
+                image: nginx:latest
+            """
+        )
+        self.env["FAKE_NO_SHELL"] = "demo-edge-1"
+        result = self.docker("compose", "up", "-d")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("could not write /etc/hosts", result.stderr)
+        state = self.load_state()
+        hosts = state["containers"]["demo-edge-1"]["files"]["/etc/hosts"]
+        self.assertIn(" app", hosts)
+        self.assertIn("host.docker.internal", hosts)
+        # And the shelled peer still got plain exec injection.
+        self.assertTrue(any(e["container"] == "demo-app-1" for e in state["exec_log"]))
 
     def test_boot_hosts_wrapper_can_be_opted_out(self) -> None:
         self.write_compose(

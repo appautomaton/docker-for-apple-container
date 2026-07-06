@@ -967,6 +967,38 @@ def _ensure_named_volume(resource: str, project: str) -> None:
 _HOST_ALIASES = "host.docker.internal gateway.docker.internal"
 
 
+def _cp_hosts_fallback(name: str, lines: list[str]) -> bool:
+    """Inject hosts lines via `container cp` when the image has no shell.
+
+    `container cp` rides the guest agent, so it works on running distroless
+    containers where `exec sh` cannot (e.g. cloudflare/cloudflared). Copy the
+    container's /etc/hosts out, append what's missing, copy it back. Only
+    suitable post-start — but a shell-less image can't take the boot-time
+    wrapper either, so this is its one injection path. Returns True on
+    success.
+    """
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        local = os.path.join(tmp, "hosts")
+        if _run_container_capture(["cp", f"{name}:/etc/hosts", local]).returncode != 0:
+            return False
+        try:
+            with open(local, encoding="utf-8") as fh:
+                current = fh.read()
+        except OSError:
+            return False
+        existing = {line.strip() for line in current.splitlines()}
+        missing = [line for line in lines if line not in existing]
+        if not missing:
+            return True
+        with open(local, "a", encoding="utf-8") as fh:
+            if current and not current.endswith("\n"):
+                fh.write("\n")
+            fh.write("\n".join(missing) + "\n")
+        return _run_container_capture(["cp", local, f"{name}:/etc/hosts"]).returncode == 0
+
+
 def _boot_hosts_lines(
     service: Service,
     project: Project,
@@ -1136,7 +1168,7 @@ def _inject_etc_hosts(
             for q in (shlex.quote(line) for line in lines)
         )
         result = _run_container_capture(["exec", name, "sh", "-c", script])
-        if result.returncode != 0:
+        if result.returncode != 0 and not _cp_hosts_fallback(name, lines):
             _warn(
                 f"could not write /etc/hosts in {name} (no shell in image, or "
                 "container exited before injection) — service/host-gateway "
