@@ -30,8 +30,9 @@ from container_docker_shim import compose  # noqa: E402
 
 
 # A fake `container` that models just enough of Apple's CLI for compose:
-# run (records labels + a synthetic IP), list --format json, inspect (with a
-# status.networks IPv4), stop/rm, network/volume create/inspect/list/rm, exec.
+# run (records labels, entrypoint/cmd + a synthetic IP), list --format json,
+# inspect (with a status.networks IPv4), image inspect (a fixed
+# ENTRYPOINT/CMD), stop/rm, network/volume create/inspect/list/rm, exec.
 FAKE_CONTAINER = r"""#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
@@ -66,7 +67,7 @@ if a[:2] == ["system", "status"]:
 
 if a[:1] == ["run"]:
     d = load()
-    name = None; labels = {}; networks = []; image = None; cmd = []
+    name = None; labels = {}; networks = []; image = None; cmd = []; entry = None
     value = {"--name","--label","--network","-e","--env","-p","--publish","-v",
              "--mount","--tmpfs","--cpus","--memory","--user","-w","--workdir",
              "--cwd","--entrypoint","--platform","--cap-add","--cap-drop",
@@ -84,6 +85,7 @@ if a[:1] == ["run"]:
             elif key == "--label":
                 k, _, val = v.partition("="); labels[k] = val
             elif key == "--network": networks.append(v)
+            elif key == "--entrypoint": entry = v
             continue
         image = arg; cmd = a[i+1:]; break
     if not name:
@@ -92,6 +94,7 @@ if a[:1] == ["run"]:
     d["containers"][name] = {
         "id": name, "name": name, "image": image or "",
         "labels": labels, "networks": networks,
+        "entrypoint": entry, "cmd": cmd,
         "configuration": {"id": name, "labels": labels,
                           "image": {"reference": image or ""}},
         "status": {"state": "running",
@@ -100,6 +103,12 @@ if a[:1] == ["run"]:
                                  "ipv4Gateway": "192.168.65.1"}]},
     }
     save(d); print(name); raise SystemExit(0)
+
+if a[:2] == ["image", "inspect"]:
+    print(json.dumps([{"name": a[-1], "variants": [
+        {"platform": {"os": "linux", "architecture": "arm64"},
+         "config": {"config": {"Entrypoint": ["/entry"], "Cmd": ["serve"]}}}]}]))
+    raise SystemExit(0)
 
 if a[:1] == ["list"]:
     d = load(); allc = "--all" in a
@@ -308,10 +317,13 @@ class TranslationTests(unittest.TestCase):
         self.assertEqual(compose._sanitize_project_name("My.App"), "my_app")
         self.assertEqual(compose._sanitize_project_name("---"), "default")
 
-    def test_command_string_uses_shell(self) -> None:
+    def test_command_string_is_shell_split(self) -> None:
+        # Compose splits string commands with shell lexical rules; it does NOT
+        # wrap them in `sh -c` — that would smuggle `/bin/sh -c ...` into the
+        # image ENTRYPOINT's argv (Dockerfile shell form is a different layer).
         self.assertEqual(
             compose._command_list("nginx -g 'daemon off;'"),
-            ["/bin/sh", "-c", "nginx -g 'daemon off;'"],
+            ["nginx", "-g", "daemon off;"],
         )
 
     def test_command_list_passthrough(self) -> None:
@@ -447,6 +459,61 @@ class ComposeE2ETests(unittest.TestCase):
         self.assertIn("host.docker.internal", script)
         # No peer line for itself (single service → no <ip> solo entry).
         self.assertNotIn(" solo", script)
+
+    def test_dependent_service_boots_with_dependency_hosts(self) -> None:
+        # web depends_on db: db starts first (topological order), so its IP is
+        # known when web launches. The shim must wrap web's entrypoint so
+        # /etc/hosts is written BEFORE the app runs — a fail-fast app dials its
+        # database in its first millisecond, long before post-start `exec`
+        # injection can land (and Apple container has no restart policies to
+        # give it a second chance).
+        self.write_compose(
+            """
+            services:
+              web:
+                image: nginx:latest
+                command: --flag on
+                depends_on: [db]
+              db:
+                image: postgres:16
+            """
+        )
+        result = self.docker("compose", "up", "-d")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.load_state()
+        web = state["containers"]["demo-web-1"]
+        db = state["containers"]["demo-db-1"]
+        self.assertIsNone(db["entrypoint"])  # no dependencies -> not wrapped
+        self.assertEqual(web["entrypoint"], "/bin/sh")
+        self.assertEqual(web["cmd"][0], "-c")
+        script = web["cmd"][1]
+        self.assertIn("192.168.65.1 db", script)  # db started first -> first IP
+        self.assertIn("host.docker.internal", script)
+        self.assertIn('exec "$@"', script)
+        # The real argv rides behind the script: image ENTRYPOINT (from
+        # `image inspect`) + the compose command — string form shell-split,
+        # never sh -c wrapped, replacing the image CMD.
+        self.assertEqual(web["cmd"][2:], ["sh", "/entry", "--flag", "on"])
+
+    def test_boot_hosts_wrapper_can_be_opted_out(self) -> None:
+        self.write_compose(
+            """
+            services:
+              web:
+                image: nginx:latest
+                depends_on: [db]
+                x-shim-boot-hosts: false
+              db:
+                image: postgres:16
+            """
+        )
+        self.assertEqual(self.docker("compose", "up", "-d").returncode, 0)
+        web = self.load_state()["containers"]["demo-web-1"]
+        self.assertIsNone(web["entrypoint"])
+        # Post-start injection still covers it.
+        state = self.load_state()
+        hosts_writes = [e for e in state["exec_log"] if "/etc/hosts" in " ".join(e["cmd"])]
+        self.assertTrue(any(e["container"] == "demo-web-1" for e in hosts_writes))
 
     def test_ps_reconstructs_from_labels(self) -> None:
         self.write_compose(

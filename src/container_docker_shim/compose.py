@@ -20,17 +20,31 @@ the compose file (it needs the service definitions and dependency order);
 Service discovery
 -----------------
 Apple `container` does not resolve service names by DNS without an admin
-`container system dns` domain. Instead, after the services start, this
-module appends ``<ip>  <service>`` lines to **each container's own
-/etc/hosts file** (read the IPs live from `container inspect`). That file
-lives in the container's ephemeral writable layer, so it vanishes when the
-container is removed. The macOS host's /etc/hosts is never touched.
+`container system dns` domain, and has no `--add-host`. The shim closes the
+gap in two layers, both writing only to **each container's own ephemeral
+/etc/hosts** (gone when the container is removed — the macOS host's
+/etc/hosts and resolver are never touched):
 
-The same injection also publishes ``host.docker.internal`` and
+1. **Boot-time, for dependencies.** Services start in `depends_on` order, so
+   by the time a dependent service launches its dependencies' addresses are
+   already known. The dependent's entrypoint is wrapped in a `/bin/sh`
+   prelude that writes ``<ip> <dependency>`` lines before exec'ing the real
+   process — so an app that dials its database in its first millisecond
+   still resolves the name. (Post-start injection alone loses that race:
+   the app crashes before `container exec` can land, and Apple `container`
+   has no restart policies to save it.) Opt out per service with
+   ``x-shim-boot-hosts: false``.
+
+2. **Post-start, for all peers.** After everything is up, ``<ip> <service>``
+   lines for the whole project are appended idempotently into every
+   container via `container exec` — covering peers that are not declared
+   dependencies.
+
+Both layers also publish ``host.docker.internal`` and
 ``gateway.docker.internal`` → the container's gateway (which, on Apple
 `container`, is the macOS host). Docker Desktop does this automatically on
-macOS/Windows; Apple `container` has no `--add-host` flag, so reproducing it
-here lets images that dial the host by that name work unchanged.
+macOS/Windows; reproducing it here lets images that dial the host by that
+name work unchanged.
 """
 
 from __future__ import annotations
@@ -39,6 +53,7 @@ import os
 import shlex
 import sys
 import threading
+import time
 from typing import Any
 
 from .cli import (
@@ -85,6 +100,11 @@ UNSUPPORTED_SERVICE_KEYS = {
     "devices": "device mapping is not supported by Apple container",
     "sysctls": "sysctls are not supported by Apple container",
 }
+
+# Per-service escape hatch: `x-shim-boot-hosts: false` skips the boot-time
+# /etc/hosts entrypoint wrapper for that service (post-start injection still
+# applies). For `depends_on` services whose image has no /bin/sh.
+BOOT_HOSTS_KEY = "x-shim-boot-hosts"
 
 
 # ========================================================================== #
@@ -653,7 +673,15 @@ def _build_run_args(
     image: str,
     ensured_volumes: set[str],
     warned: set[str],
-) -> list[str]:
+    boot_hosts: list[str] | None = None,
+) -> tuple[list[str], bool]:
+    """Translate a service into `container run` args.
+
+    Returns ``(args, wrapped)`` — ``wrapped`` is True when ``boot_hosts``
+    lines were baked into a /bin/sh entrypoint prelude (see
+    ``_boot_hosts_script``), so the caller can fall back to an unwrapped
+    launch if the wrapped one fails to start.
+    """
     spec = service.spec
     args: list[str] = ["-d"]
 
@@ -723,18 +751,32 @@ def _build_run_args(
 
     _warn_unsupported(service, warned)
 
-    entrypoint = _as_list(spec.get("entrypoint")) if spec.get("entrypoint") is not None else None
+    # Compose entrypoint follows the same string-splitting rules as command.
+    entrypoint = _command_list(spec["entrypoint"]) if spec.get("entrypoint") is not None else None
     command = _command_list(spec.get("command"))
     positional: list[str] = []
-    if entrypoint:
-        args.extend(["--entrypoint", _as_str(entrypoint[0])])
-        positional.extend(_as_str(item) for item in entrypoint[1:])
-    if command:
-        positional.extend(command)
+    wrapped = False
+    if boot_hosts:
+        argv = _boot_argv(service, image, entrypoint, command)
+        if argv:
+            args.extend(["--entrypoint", "/bin/sh"])
+            positional = ["-c", _boot_hosts_script(boot_hosts), "sh", *argv]
+            wrapped = True
+        else:
+            _warn(
+                f"service {service.name!r}: could not resolve the image entrypoint — "
+                "dependency names will be injected post-start only"
+            )
+    if not wrapped:
+        if entrypoint:
+            args.extend(["--entrypoint", entrypoint[0]])
+            positional.extend(entrypoint[1:])
+        if command:
+            positional.extend(command)
 
     args.append(image)
     args.extend(positional)
-    return args
+    return args, wrapped
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -750,8 +792,10 @@ def _command_list(value: Any) -> list[str]:
         return []
     if isinstance(value, list):
         return [_as_str(item) for item in value]
-    # A bare string command runs through the shell, matching Docker semantics.
-    return ["/bin/sh", "-c", _as_str(value)]
+    # Compose splits string commands with shell *lexical* rules — it does NOT
+    # wrap them in `sh -c` (that's Dockerfile shell form, a different layer).
+    # `command: --log-dir /data` must reach the image ENTRYPOINT as two args.
+    return shlex.split(_as_str(value))
 
 
 def _resource_limits(spec: dict[str, Any]) -> tuple[str, str]:
@@ -923,7 +967,126 @@ def _ensure_named_volume(resource: str, project: str) -> None:
 _HOST_ALIASES = "host.docker.internal gateway.docker.internal"
 
 
-def _inject_etc_hosts(project: Project, services: list[Service]) -> None:
+def _boot_hosts_lines(
+    service: Service,
+    project: Project,
+    ip_by_service: dict[str, str],
+    gateway_ip: str | None,
+) -> list[str]:
+    """/etc/hosts lines a dependent service needs before its entrypoint runs.
+
+    Dependencies started earlier in this `up` are in ``ip_by_service``; a
+    dependency excluded by a partial `up <service>` may still be running from
+    a previous `up`, so fall back to inspecting it live. Services without
+    ``depends_on`` return [] — for them post-start injection is the whole
+    story, as before.
+    """
+    if not service.depends_on or service.spec.get(BOOT_HOSTS_KEY) is False:
+        return []
+    lines: list[str] = []
+    gateway = gateway_ip
+    for dep in dict.fromkeys(service.depends_on):
+        ip = ip_by_service.get(dep)
+        if ip is None:
+            dep_service = project.services.get(dep)
+            if dep_service is None:
+                continue  # depends_on a service not defined here — ignore, like Docker
+            dep_name = dep_service.container_name or f"{project.name}-{dep}-1"
+            ip, dep_gateway = _container_net(dep_name)
+            gateway = gateway or dep_gateway
+        if ip:
+            lines.append(f"{ip} {dep}")
+        else:
+            _warn(
+                f"service {service.name!r}: dependency {dep!r} has no address yet — "
+                f"{dep!r} will only resolve after post-start injection"
+            )
+    if lines and gateway:
+        lines.append(f"{gateway} {_HOST_ALIASES}")
+    return lines
+
+
+def _boot_hosts_script(lines: list[str]) -> str:
+    """A /bin/sh prelude: write ``lines`` into /etc/hosts, then exec the real argv.
+
+    The real argv rides in as ``"$@"`` so it never needs quoting into the
+    script. Append failures (read-only fs, non-root USER, no grep) must not
+    stop the container from booting — hence the blanket ``|| true``.
+    """
+    entries = " ".join(shlex.quote(line) for line in lines)
+    return (
+        "{ for l in " + entries + "; do "
+        'grep -qxF "$l" /etc/hosts || printf \'%s\\n\' "$l" >> /etc/hosts; '
+        "done; } 2>/dev/null || true; "
+        'exec "$@"'
+    )
+
+
+def _boot_argv(
+    service: Service, image: str, entrypoint: list[str] | None, command: list[str]
+) -> list[str] | None:
+    """The exact argv the container would run unwrapped, or None if unknowable.
+
+    Mirrors Docker precedence: a compose ``entrypoint:`` override also
+    discards the image CMD; otherwise image ENTRYPOINT + (compose command,
+    or the image CMD when no command is given).
+    """
+    if entrypoint is not None:
+        return (entrypoint + command) or None
+    platform_hint = _as_str(service.spec["platform"]) if service.spec.get("platform") else None
+    defaults = _image_default_argv(image, platform_hint)
+    if defaults is None:
+        return None
+    image_entrypoint, image_cmd = defaults
+    return (image_entrypoint + (command or image_cmd)) or None
+
+
+def _image_default_argv(image: str, platform_hint: str | None) -> tuple[list[str], list[str]] | None:
+    """(ENTRYPOINT, CMD) from the image config, or None if not inspectable.
+
+    `container image inspect` returns one entry per platform variant; pick
+    the one matching the requested platform (or the host architecture).
+    """
+    result = _run_container_capture(["image", "inspect", image])
+    if result.returncode != 0:
+        return None
+    import json
+
+    try:
+        data = json.loads(result.stdout or "[]")
+    except ValueError:
+        return None
+    item = data[0] if isinstance(data, list) and data else data
+    if not isinstance(item, dict):
+        return None
+    variants = [v for v in item.get("variants") or [] if isinstance(v, dict)]
+    if not variants:
+        return None
+    if platform_hint and "/" in platform_hint:
+        want_arch: str | None = platform_hint.split("/")[1]
+    else:
+        import platform as host_platform
+
+        machine = host_platform.machine().lower()
+        want_arch = {"x86_64": "amd64", "aarch64": "arm64"}.get(machine, machine)
+    chosen = variants[0]
+    for variant in variants:
+        if (variant.get("platform") or {}).get("architecture") == want_arch:
+            chosen = variant
+            break
+    config = (chosen.get("config") or {}).get("config") or {}
+    image_entrypoint = config.get("Entrypoint") or []
+    image_cmd = config.get("Cmd") or []
+    if not isinstance(image_entrypoint, list) or not isinstance(image_cmd, list):
+        return None
+    return [_as_str(x) for x in image_entrypoint], [_as_str(x) for x in image_cmd]
+
+
+def _inject_etc_hosts(
+    project: Project,
+    services: list[Service],
+    net_info: dict[str, tuple[str | None, str | None]] | None = None,
+) -> None:
     """Populate each container's own /etc/hosts with peer + host-gateway names.
 
     Two things are injected per container, via `container exec`:
@@ -938,17 +1101,21 @@ def _inject_etc_hosts(project: Project, services: list[Service]) -> None:
 
     All writes land in **each container's ephemeral /etc/hosts**, discarded on
     removal — the macOS host's /etc/hosts is never read or written. Each line is
-    appended only if not already present (idempotent across re-runs). If a
-    container has no shell (e.g. distroless), its `exec` fails and that one
-    container is skipped with a warning rather than failing the whole `up`.
+    appended only if not already present (idempotent across re-runs, and with
+    the boot-time wrapper's lines). If the `exec` fails (no shell in the image,
+    or the container already exited), that one container is skipped with a
+    warning rather than failing the whole `up`.
+
+    ``net_info`` carries addresses already inspected by the caller (keyed by
+    container name); anything missing is inspected here.
     """
-    # Resolve every container's address + gateway up front (one inspect each).
-    info: dict[str, tuple[str | None, str | None]] = {}
+    info: dict[str, tuple[str | None, str | None]] = dict(net_info or {})
     peers: list[tuple[str, str]] = []
     for service in services:
         name = service.container_name or f"{project.name}-{service.name}-1"
-        ip, gateway = _container_net(name)
-        info[name] = (ip, gateway)
+        if name not in info:
+            info[name] = _container_net(name)
+        ip = info[name][0]
         if ip:
             peers.append((service.name, ip))
 
@@ -971,8 +1138,9 @@ def _inject_etc_hosts(project: Project, services: list[Service]) -> None:
         result = _run_container_capture(["exec", name, "sh", "-c", script])
         if result.returncode != 0:
             _warn(
-                f"could not set host.docker.internal in {name} "
-                "(no shell in image?) — host-gateway name unavailable there"
+                f"could not write /etc/hosts in {name} (no shell in image, or "
+                "container exited before injection) — service/host-gateway "
+                "names may be unavailable there"
             )
 
 
@@ -1033,19 +1201,60 @@ def cmd_up(project: Project, *, detach: bool, build: bool, only: list[str], no_b
     ensured_volumes: set[str] = set()
     warned: set[str] = set()
     started: list[Service] = []
+    net_info: dict[str, tuple[str | None, str | None]] = {}
+    ip_by_service: dict[str, str] = {}
+    gateway_ip: str | None = None
+    depended_on = {dep for svc in services for dep in svc.depends_on}
     for service in services:
         image = _resolve_image(service, project, build=build, no_build=no_build)
-        run_args = _build_run_args(
-            service, project, image=image, ensured_volumes=ensured_volumes, warned=warned
+        boot_hosts = _boot_hosts_lines(service, project, ip_by_service, gateway_ip)
+        run_args, wrapped = _build_run_args(
+            service,
+            project,
+            image=image,
+            ensured_volumes=ensured_volumes,
+            warned=warned,
+            boot_hosts=boot_hosts,
         )
-        print(f"Creating {project.name}-{service.name}-1 ...")
+        name = service.container_name or f"{project.name}-{service.name}-1"
+        print(f"Creating {name} ...")
         result = _run_container_capture(["run", *run_args])
+        if result.returncode != 0 and wrapped:
+            # Most likely no /bin/sh in the image — relaunch unwrapped and
+            # leave name resolution to post-start injection, as before.
+            _warn(
+                f"service {service.name!r}: boot-time hosts wrapper failed to "
+                "start — retrying without it"
+            )
+            _run_container_capture(["rm", name])
+            run_args, _ = _build_run_args(
+                service,
+                project,
+                image=image,
+                ensured_volumes=ensured_volumes,
+                warned=warned,
+            )
+            result = _run_container_capture(["run", *run_args])
         if result.returncode != 0:
             sys.stderr.write(result.stderr or result.stdout)
             return result.returncode
         started.append(service)
+        # Learn this container's address now so later dependents can bake it
+        # into their boot-time /etc/hosts (retry briefly — the address can lag
+        # `run` returning by a beat, and a dependent needs it).
+        ip, gateway = _container_net(name)
+        if ip is None and service.name in depended_on:
+            for _ in range(3):
+                time.sleep(0.3)
+                ip, gateway = _container_net(name)
+                if ip:
+                    break
+        net_info[name] = (ip, gateway)
+        if ip:
+            ip_by_service[service.name] = ip
+        gateway_ip = gateway_ip or gateway
 
-    _inject_etc_hosts(project, started)
+    _inject_etc_hosts(project, started, net_info)
 
     if detach:
         return 0

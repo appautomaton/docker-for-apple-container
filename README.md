@@ -137,11 +137,23 @@ read the compose file.
 - **Project name** resolves like Docker: `-p NAME` → `COMPOSE_PROJECT_NAME` →
   the file's `name:` → the directory basename.
 - **Service discovery.** Apple does not resolve service names by DNS without an
-  admin `container system dns` domain. Instead, after services start, the shim
-  appends `<ip>  <service>` lines to **each container's own `/etc/hosts` file**
-  (IPs read live from `container inspect`). That file lives in the container's
-  ephemeral layer and is discarded when the container is removed. **The macOS
-  host's `/etc/hosts` is never touched.**
+  admin `container system dns` domain. The shim closes the gap in two layers,
+  both writing `<ip>  <service>` lines only to **each container's own
+  `/etc/hosts` file** (ephemeral, discarded with the container — **the macOS
+  host's `/etc/hosts` is never touched**):
+  - *Boot-time, for dependencies.* Services start in `depends_on` order, so a
+    dependent service's dependencies already have known IPs. The shim wraps
+    its entrypoint in a `/bin/sh` prelude that writes those lines **before**
+    exec'ing the real process — an app that dials its database in its first
+    millisecond still resolves the name (post-start injection alone loses
+    that race, and Apple has no restart policies to give the app a second
+    try). Requires `/bin/sh` in the image; if the wrapped launch fails, the
+    shim retries unwrapped. Opt out per service with
+    `x-shim-boot-hosts: false`.
+  - *Post-start, for all peers.* After everything is up, the full project's
+    lines are appended idempotently into every container via `container exec`
+    (IPs read live from `container inspect`), covering peers that aren't
+    declared dependencies.
 - **`host.docker.internal`.** The same `/etc/hosts` injection also publishes
   `host.docker.internal` and `gateway.docker.internal` pointing at the
   container's gateway, which on Apple `container` **is the macOS host.** This
