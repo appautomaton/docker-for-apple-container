@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -193,6 +194,45 @@ def _docker_state(value: Any) -> str:
     return raw
 
 
+def _without_cidr(value: Any) -> str:
+    return str(value or "").split("/", 1)[0]
+
+
+def _normalize_networks(item: dict[str, Any]) -> list[dict[str, str]]:
+    raw = _deep_get(item, "status", "networks") or item.get("networks") or []
+    if not isinstance(raw, list):
+        return []
+
+    networks: list[dict[str, str]] = []
+    for attachment in raw:
+        if not isinstance(attachment, dict):
+            continue
+        name = str(
+            attachment.get("network")
+            or attachment.get("name")
+            or attachment.get("NetworkID")
+            or ""
+        )
+        if not name:
+            continue
+        networks.append(
+            {
+                "name": name,
+                "ipv4": _without_cidr(
+                    attachment.get("ipv4Address") or attachment.get("address")
+                ),
+                "gateway": str(
+                    attachment.get("ipv4Gateway")
+                    or attachment.get("gateway")
+                    or ""
+                ),
+                "ipv6": _without_cidr(attachment.get("ipv6Address")),
+                "mac": str(attachment.get("macAddress") or ""),
+            }
+        )
+    return networks
+
+
 def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
     item_id = _first_present(item, ("id", "ID", "containerID", "container_id"))
     name = _first_present(item, ("name", "Name", "names", "Names"))
@@ -212,6 +252,35 @@ def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
         or item.get("Status")
     )
     docker_state = _docker_state(raw_state)
+    created_at = str(
+        _deep_get(item, "configuration", "creationDate")
+        or item.get("creationDate")
+        or item.get("Created")
+        or DOCKER_ZERO_TIME
+    )
+    started_at = str(
+        _deep_get(item, "status", "startedDate")
+        or item.get("startedDate")
+        or item.get("StartedAt")
+        or DOCKER_ZERO_TIME
+    )
+    explicit_finished_at = (
+        _deep_get(item, "status", "finishedDate")
+        or _deep_get(item, "status", "finishedAt")
+        or _deep_get(item, "status", "stoppedDate")
+        or _deep_get(item, "status", "terminatedDate")
+        or item.get("finishedAt")
+        or item.get("FinishedAt")
+    )
+    if docker_state == "exited":
+        finished_at = str(
+            explicit_finished_at
+            or (started_at if started_at != DOCKER_ZERO_TIME else None)
+            or (created_at if created_at != DOCKER_ZERO_TIME else None)
+            or DOCKER_ZERO_TIME
+        )
+    else:
+        finished_at = str(explicit_finished_at or DOCKER_ZERO_TIME)
 
     return {
         "id": str(item_id or name),
@@ -224,24 +293,19 @@ def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
             or _deep_get(item, "image", "reference")
             or ""
         ),
+        "image_id": str(
+            _deep_get(item, "configuration", "image", "descriptor", "digest")
+            or _deep_get(item, "image", "descriptor", "digest")
+            or item.get("imageID")
+            or item.get("ImageID")
+            or ""
+        ),
         "state": docker_state,
         "labels": labels,
-        "finished_at": str(
-            _deep_get(item, "status", "finishedDate")
-            or _deep_get(item, "status", "finishedAt")
-            or _deep_get(item, "status", "stoppedDate")
-            or _deep_get(item, "status", "terminatedDate")
-            or item.get("finishedAt")
-            or item.get("FinishedAt")
-            # Apple container can omit the finish time on a stopped container
-            # and expose only creationDate/startedDate. Fall back so an
-            # orphan reaper sees a real, parseable, past timestamp instead of
-            # the zero-value it reads as "never finished" and refuses to reap,
-            # which would leak every exited container forever.
-            or _deep_get(item, "status", "startedDate")
-            or _deep_get(item, "configuration", "creationDate")
-            or DOCKER_ZERO_TIME
-        ),
+        "created_at": created_at,
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "networks": _normalize_networks(item),
     }
 
 
@@ -375,9 +439,21 @@ def _extract_entrypoint(image: Any) -> Any:
 def _docker_inspect_object(row: dict[str, Any]) -> dict[str, Any]:
     state = row.get("state") or "unknown"
     running = state == "running"
+    attachments = row.get("networks") or []
+    networks = {
+        attachment["name"]: {
+            "IPAddress": attachment.get("ipv4", ""),
+            "Gateway": attachment.get("gateway", ""),
+            "GlobalIPv6Address": attachment.get("ipv6", ""),
+            "MacAddress": attachment.get("mac", ""),
+        }
+        for attachment in attachments
+    }
     return {
         "Id": row.get("id", ""),
         "Name": row.get("name", ""),
+        "Image": row.get("image_id") or row.get("image", ""),
+        "Created": row.get("created_at", DOCKER_ZERO_TIME),
         "Config": {
             "Image": row.get("image", ""),
             "Labels": row.get("labels", {}),
@@ -385,9 +461,110 @@ def _docker_inspect_object(row: dict[str, Any]) -> dict[str, Any]:
         "State": {
             "Status": state,
             "Running": running,
-            "FinishedAt": DOCKER_ZERO_TIME if running else row.get("finished_at", DOCKER_ZERO_TIME),
+            "StartedAt": row.get("started_at", DOCKER_ZERO_TIME),
+            "FinishedAt": (
+                DOCKER_ZERO_TIME
+                if running
+                else row.get("finished_at", DOCKER_ZERO_TIME)
+            ),
+        },
+        "NetworkSettings": {
+            "IPAddress": attachments[0].get("ipv4", "") if attachments else "",
+            "Networks": networks,
         },
     }
+
+
+_INSPECT_PATH_SEGMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _compile_inspect_template(template: str) -> list[tuple[str, Any, bool]]:
+    tokens: list[tuple[str, Any, bool]] = []
+    cursor = 0
+    while cursor < len(template):
+        start = template.find("{{", cursor)
+        stray_close = template.find("}}", cursor)
+        if stray_close != -1 and (start == -1 or stray_close < start):
+            raise ShimError("malformed inspect format: unmatched '}}'", 64)
+        if start == -1:
+            tokens.append(("literal", template[cursor:], False))
+            break
+        if start > cursor:
+            tokens.append(("literal", template[cursor:start], False))
+
+        end = template.find("}}", start + 2)
+        if end == -1:
+            raise ShimError("malformed inspect format: unmatched '{{'", 64)
+        expression = template[start + 2:end].strip()
+        if not expression or "{{" in expression:
+            raise ShimError(
+                f"unsupported inspect format expression: {expression!r}", 64
+            )
+
+        parts = expression.split()
+        use_json = False
+        if len(parts) == 1:
+            path = parts[0]
+        elif len(parts) == 2 and parts[0] == "json":
+            use_json = True
+            path = parts[1]
+        else:
+            raise ShimError(f"unsupported inspect format expression: {expression}", 64)
+
+        if path == ".":
+            segments: tuple[str, ...] = ()
+        elif path.startswith("."):
+            segments = tuple(path[1:].split("."))
+            if not segments or any(
+                not _INSPECT_PATH_SEGMENT.fullmatch(segment) for segment in segments
+            ):
+                raise ShimError(f"unsupported inspect field path: {path}", 64)
+        else:
+            raise ShimError(f"unsupported inspect format expression: {expression}", 64)
+
+        tokens.append((path, segments, use_json))
+        cursor = end + 2
+    return tokens
+
+
+def _inspect_field_value(
+    obj: dict[str, Any], path: str, segments: tuple[str, ...]
+) -> Any:
+    value: Any = obj
+    for segment in segments:
+        if not isinstance(value, dict) or segment not in value:
+            raise ShimError(f"unsupported inspect field: {path}", 64)
+        value = value[segment]
+    return value
+
+
+def _render_inspect_template(
+    tokens: list[tuple[str, Any, bool]], obj: dict[str, Any]
+) -> str:
+    rendered: list[str] = []
+    for token, payload, use_json in tokens:
+        if token == "literal":
+            rendered.append(str(payload))
+            continue
+
+        path = token
+        value = _inspect_field_value(obj, path, payload)
+        if use_json:
+            rendered.append(
+                json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+            )
+        elif isinstance(value, bool):
+            rendered.append("true" if value else "false")
+        elif value is None:
+            rendered.append("")
+        elif isinstance(value, (dict, list)):
+            raise ShimError(
+                f"inspect field {path} is a composite value; use '{{{{json {path}}}}}'",
+                64,
+            )
+        else:
+            rendered.append(str(value))
+    return "".join(rendered)
 
 
 def cmd_version(argv: list[str]) -> int:
@@ -555,25 +732,46 @@ def cmd_ps(argv: list[str]) -> int:
 
 
 def cmd_inspect(argv: list[str]) -> int:
-    fmt = None
+    fmt: str | None = None
+    inspect_type: str | None = None
     ids: list[str] = []
     i = 0
     while i < len(argv):
-        arg, value = _split_long(argv[i])
-        if arg in ("-f", "--format"):
+        raw = argv[i]
+        arg, value = _split_long(raw)
+        if raw == "-f":
+            fmt, i = _take_value(argv, i, "-f")
+            continue
+        if raw.startswith("-f") and not raw.startswith("--"):
+            fmt = raw[2:]
+            if fmt.startswith("="):
+                fmt = fmt[1:]
+        elif arg == "--format":
             fmt = value
             if fmt is None:
-                fmt, i = _take_value(argv, i, arg)
+                fmt, i = _take_value(argv, i, "--format")
                 continue
-        elif argv[i].startswith("-"):
-            return _die(f"unsupported inspect option: {argv[i]}", 64)
+        elif arg == "--type":
+            inspect_type = value
+            if inspect_type is None:
+                inspect_type, i = _take_value(argv, i, "--type")
+                continue
+        elif raw.startswith("-"):
+            return _die(f"unsupported inspect option: {raw}", 64)
         else:
-            ids.append(argv[i])
+            ids.append(raw)
         i += 1
+
+    if inspect_type not in (None, "container"):
+        return _die(
+            f"unsupported inspect type: {inspect_type}. Only container is supported",
+            64,
+        )
     if not ids:
         return _die("inspect requires at least one container", 64)
+    template = _compile_inspect_template(fmt) if fmt is not None else None
 
-    rows: list[dict[str, Any]] = []
+    objects: list[dict[str, Any]] = []
     for ident in ids:
         result = _run_container_capture(["inspect", ident])
         if result.returncode != 0:
@@ -587,24 +785,24 @@ def cmd_inspect(argv: list[str]) -> int:
         if not isinstance(item, dict):
             item = {}
         row = _normalize_inspect_item(item, ident)
-        rows.append(row)
+        objects.append(_docker_inspect_object(row))
 
-    if fmt:
-        if fmt == "{{.State.FinishedAt}}":
-            for row in rows:
-                if row.get("state") == "running":
-                    print(DOCKER_ZERO_TIME)
-                else:
-                    print(row.get("finished_at") or DOCKER_ZERO_TIME)
-            return 0
-        if fmt == "{{.State.Running}}":
-            for row in rows:
-                print("true" if row.get("state") == "running" else "false")
-            return 0
-        return _die(f"unsupported inspect format: {fmt}", 64)
+    if template is not None:
+        output = [_render_inspect_template(template, obj) for obj in objects]
+        for line in output:
+            print(line)
+        return 0
 
-    print(json.dumps([_docker_inspect_object(row) for row in rows], indent=2))
+    print(json.dumps(objects, indent=2))
     return 0
+
+
+def cmd_container(argv: list[str]) -> int:
+    if not argv:
+        return _die("container requires a subcommand", 64)
+    if argv[0] == "inspect":
+        return cmd_inspect(argv[1:])
+    return _unsupported("container " + " ".join(argv))
 
 
 def _parse_run_options(
@@ -1273,6 +1471,8 @@ def print_help() -> None:
     print("Translated:  version, info, build, run, create, ps, inspect,")
     print("             image inspect, start, exec, stop, restart, rm, logs, cp,")
     print("             stats, export, login, logout, system prune")
+    print("Alias:       container inspect")
+    print("Inspect fmt: field paths, literal text, and json; not full Go templates")
     print("Compose:     compose up/down/ps/logs/build/config/ls (stateless;")
     print("             project state lives in Apple container labels)")
     print("Passthrough: images, pull, push, tag, save, load, rmi, image <sub>,")
@@ -1312,6 +1512,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_ps(rest)
         if command == "inspect":
             return cmd_inspect(rest)
+        if command == "container":
+            return cmd_container(rest)
         if command == "run":
             return cmd_run(rest)
         if command == "start":

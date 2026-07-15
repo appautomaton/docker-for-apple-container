@@ -7,10 +7,17 @@ docker-for-apple-container is a stateless translator: it maps each supported `do
 
 ## Runtime compatibility
 
-- Requires macOS 26 with Apple `container` 1.0.0 or newer.
+- Requires macOS 26 with Apple `container` 1.1.0 or newer.
 - The current compatibility baseline is Apple `container` 1.1.0.
 - Apple's Containerization Swift package is bundled by Apple as part of
   `container`; it is not a direct shim dependency or a separate installation.
+
+## Inspect formatting
+
+`docker inspect` and `docker container inspect` share one Docker-shaped object.
+The `-f`/`--format` implementation supports field paths, literal text, multiple
+expressions, and `json` rendering. It intentionally refuses unsupported fields
+and full Go-template control flow rather than approximating them.
 
 ## Links
 

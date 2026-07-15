@@ -53,7 +53,7 @@ from an environment variable or config setting, point that at the installed
 
 ## Requirements
 
-- macOS 26 with Apple `container` 1.0.0 or newer
+- macOS 26 with Apple `container` 1.1.0 or newer
 - The `container` apiserver running (check with `container system status`)
 
 The current compatibility baseline is Apple `container` 1.1.0. The shim depends
@@ -85,11 +85,20 @@ of pretending to work.
 - `docker create ... IMAGE CMD...` uses the same flag translation as `run` and
   prints the new container ID
 - `docker ps -a --filter ... --format ...`
-- `docker inspect --format "{{.State.FinishedAt}}" CONTAINER`
+- `docker inspect [--type container] [-f|--format TEMPLATE] CONTAINER...`
+- `docker container inspect ...` is an alias for `docker inspect`
 - `docker start CONTAINER`
 - `docker exec [-i] [-e KEY=VALUE] CONTAINER CMD...`
 - `docker stop -t N CONTAINER`
 - `docker rm [-f] CONTAINER`
+
+`docker inspect` supports a deliberate template subset: case-sensitive field
+paths, optional whitespace, multiple expressions mixed with literal text, and
+`json` rendering such as `{{json .Config.Labels}}` or `{{json .}}`. The
+Docker-shaped object currently includes identity, image, labels, lifecycle
+state and timestamps, plus primary and per-network addresses. Dictionaries and
+lists require `json`; unsupported fields and full Go-template features fail
+clearly instead of being guessed.
 
 ### Translated extras
 
@@ -214,17 +223,15 @@ shim-owned file. See the Compose section above.
 
 ## Tests
 
-Unit tests use a fake `container` binary and do not start real containers. They
-cover the core Docker command contract in `tests/test_hermes_contract.py`, and
-compose in `tests/test_compose.py` (parser, interpolation, topo sort,
-translation, and label-based orchestration):
+Unit tests use a fake `container` binary and do not start real containers. The
+suite separates generic CLI and inspect behavior from focused consumer
+contracts, while compose tests cover parsing, interpolation, dependency order,
+translation, and label-based orchestration:
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
 Live smoke testing against Apple `container` is intentionally manual because it
-starts and removes containers. The compose path was originally verified
-end-to-end against Apple `container` 1.0.0 (multi-service `up`, label
-reconstruction, service-name resolution, `build:`, named volumes, and clean
-`down`/`down -v`). The current development and test-fixture baseline is 1.1.0.
+starts and removes containers. The current development and test-fixture
+baseline is Apple `container` 1.1.0.
