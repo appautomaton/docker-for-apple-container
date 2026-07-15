@@ -61,7 +61,7 @@ def take(a, i):
 a = sys.argv[1:]
 
 if a[:1] == ["--version"]:
-    print("container CLI version 1.0.0 (fake)"); raise SystemExit(0)
+    print("container CLI version 1.1.0 (fake)"); raise SystemExit(0)
 if a[:2] == ["system", "status"]:
     print("apiserver is running"); raise SystemExit(0)
 

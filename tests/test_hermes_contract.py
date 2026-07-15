@@ -47,7 +47,7 @@ if args and args[0] == "create":
     created_mode = True
     args = ["run", "-d"] + args[1:]
 if args == ["--version"]:
-    print("container CLI version 1.0.0 (fake)")
+    print("container CLI version 1.1.0 (fake)")
     raise SystemExit(0)
 
 if args[:2] == ["system", "status"]:
@@ -286,6 +286,7 @@ class HermesContractTests(unittest.TestCase):
     def test_hermes_lifecycle_contract(self) -> None:
         version = self.docker("version")
         self.assertEqual(version.returncode, 0, version.stderr)
+        self.assertIn("container CLI version 1.1.0", version.stdout)
 
         image = self.docker(
             "image",
@@ -376,7 +377,7 @@ class HermesContractTests(unittest.TestCase):
 
         after_stop = self.docker("inspect", "--format", "{{.State.FinishedAt}}", "hermes-test")
         self.assertEqual(after_stop.returncode, 0, after_stop.stderr)
-        # Apple records no finish time; the shim falls back to startedDate so
+        # Apple may omit the finish time; the shim falls back to startedDate so
         # Hermes' reaper sees a real, parseable, past timestamp rather than the
         # zero-value it treats as "never finished, don't reap".
         self.assertEqual(after_stop.stdout.strip(), "2026-01-01T00:00:05Z")
@@ -397,8 +398,8 @@ class HermesContractTests(unittest.TestCase):
         self.assertEqual(gone.stdout.strip(), "")
 
     def test_finished_at_is_real_for_stopped_container(self) -> None:
-        # Apple container 1.0.0 inspect on a STOPPED container exposes only
-        # creationDate + startedDate + state — no finish field. Returning the
+        # Apple container may expose only creationDate + startedDate + state
+        # for a stopped container, with no finish field. Returning the
         # zero-value would make Hermes' orphan reaper treat it as "never
         # finished" and never reap it, leaking every exited container. The
         # shim must surface a real timestamp Hermes can parse and age out.
@@ -411,6 +412,22 @@ class HermesContractTests(unittest.TestCase):
         # Hermes parses this with datetime.fromisoformat after Z -> +00:00.
         import datetime
         datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+
+    def test_inspect_short_format_reports_running_state(self) -> None:
+        run = self.docker(
+            "run", "-d", "--name", "state-probe", "alpine", "sleep", "infinity"
+        )
+        self.assertEqual(run.returncode, 0, run.stderr)
+
+        running = self.docker("inspect", "-f", "{{.State.Running}}", "state-probe")
+        self.assertEqual(running.returncode, 0, running.stderr)
+        self.assertEqual(running.stdout.strip(), "true")
+
+        stop = self.docker("stop", "state-probe")
+        self.assertEqual(stop.returncode, 0, stop.stderr)
+        stopped = self.docker("inspect", "-f", "{{.State.Running}}", "state-probe")
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertEqual(stopped.stdout.strip(), "false")
 
     def test_network_none_is_refused(self) -> None:
         result = self.docker("run", "-d", "--network=none", "alpine", "sleep", "infinity")

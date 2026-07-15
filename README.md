@@ -53,8 +53,13 @@ from an environment variable or config setting, point that at the installed
 
 ## Requirements
 
-- macOS with Apple `container` 1.0.0
+- macOS 26 with Apple `container` 1.0.0 or newer
 - The `container` apiserver running (check with `container system status`)
+
+The current compatibility baseline is Apple `container` 1.1.0. The shim depends
+on the `container` executable, not directly on Apple's Containerization Swift
+package. Apple selects and bundles Containerization as part of `container`, so
+there is no separate framework to install or manage.
 
 Nothing else to install. The shim is pure Python standard library with no
 third-party packages, and it runs on the Python that ships with macOS.
@@ -219,6 +224,7 @@ python3 -m unittest discover -s tests -v
 ```
 
 Live smoke testing against Apple `container` is intentionally manual because it
-starts and removes containers. The compose path has been verified end-to-end
-against Apple `container` 1.0.0 (multi-service `up`, label reconstruction,
-service-name resolution, `build:`, named volumes, and clean `down`/`down -v`).
+starts and removes containers. The compose path was originally verified
+end-to-end against Apple `container` 1.0.0 (multi-service `up`, label
+reconstruction, service-name resolution, `build:`, named volumes, and clean
+`down`/`down -v`). The current development and test-fixture baseline is 1.1.0.

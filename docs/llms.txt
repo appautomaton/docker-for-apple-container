@@ -5,6 +5,13 @@
 
 docker-for-apple-container is a stateless translator: it maps each supported `docker` command to a clean Apple `container` equivalent and fails loudly on the rest. Apple `container` is the single source of truth, so the shim persists nothing of its own (no sidecar file, registry, or database). Even `docker compose` stays stateless: project membership is stored as labels in Apple's own object store, exactly as Docker Compose does.
 
+## Runtime compatibility
+
+- Requires macOS 26 with Apple `container` 1.0.0 or newer.
+- The current compatibility baseline is Apple `container` 1.1.0.
+- Apple's Containerization Swift package is bundled by Apple as part of
+  `container`; it is not a direct shim dependency or a separate installation.
+
 ## Links
 
 - [Landing page (this site)](https://appautomaton.github.io/docker-for-apple-container/): overview, install steps, FAQ, command-tier table.
