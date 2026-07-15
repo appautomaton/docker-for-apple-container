@@ -560,7 +560,7 @@ def cmd_inspect(argv: list[str]) -> int:
     i = 0
     while i < len(argv):
         arg, value = _split_long(argv[i])
-        if arg == "--format":
+        if arg in ("-f", "--format"):
             fmt = value
             if fmt is None:
                 fmt, i = _take_value(argv, i, arg)
@@ -596,6 +596,10 @@ def cmd_inspect(argv: list[str]) -> int:
                     print(DOCKER_ZERO_TIME)
                 else:
                     print(row.get("finished_at") or DOCKER_ZERO_TIME)
+            return 0
+        if fmt == "{{.State.Running}}":
+            for row in rows:
+                print("true" if row.get("state") == "running" else "false")
             return 0
         return _die(f"unsupported inspect format: {fmt}", 64)
 
