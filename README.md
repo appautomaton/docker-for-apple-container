@@ -88,7 +88,9 @@ verified Apple equivalent exists, the shim refuses it explicitly.
 - `docker version`
 - `docker info --format "{{.Driver}}"`
 - `docker build -f DOCKERFILE -t TAG CONTEXT`
-- `docker image inspect IMAGE --format "{{json .Config.Entrypoint}}"`
+- `docker image inspect [--platform OS/ARCH] [-f|--format TEMPLATE] IMAGE...`
+- `docker images` / `docker image ls` with Docker-shaped default, quiet,
+  digest, no-truncation, JSON, and bounded template output
 - `docker run -d ... IMAGE CMD...`
 - `docker create ... IMAGE CMD...` uses the same flag translation as `run` and
   prints the new container ID
@@ -107,6 +109,12 @@ Docker-shaped object currently includes identity, image, labels, lifecycle
 state and timestamps, plus primary and per-network addresses. Dictionaries and
 lists require `json`; unsupported fields and full Go-template features fail
 clearly instead of being guessed.
+
+Image inspection uses the same bounded formatter and selects the requested
+platform, or the host platform when none is given. Its Docker-shaped object
+includes IDs, tags, repository digests, creation time, size, platform, image
+configuration, and root filesystem layers. Image-list templates support
+`ID`, `Repository`, `Tag`, `Digest`, `CreatedSince`, `CreatedAt`, and `Size`.
 
 ### Translated extras
 
@@ -133,8 +141,8 @@ clearly instead of being guessed.
 
 ### Thin passthrough (basic forms only)
 
-`docker images`, `docker pull`, `docker push`, `docker tag`, `docker save`,
-`docker load`, `docker rmi` (top-level aliases for `docker image <sub>`),
+`docker pull`, `docker push`, `docker tag`, `docker save`, `docker load`,
+`docker rmi` (top-level aliases for `docker image <sub>`),
 `docker image <sub>` (`pull`/`rm`/`tag`/`push`/`save`/`load`/`prune`/`ls`),
 `docker network <sub>` and `docker volume <sub>`
 (`create`/`ls`/`rm`/`inspect`/`prune`), and `docker kill [-s SIG]` forward to the

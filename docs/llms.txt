@@ -23,6 +23,10 @@ The `-f`/`--format` implementation supports field paths, literal text, multiple
 expressions, and `json` rendering. It intentionally refuses unsupported fields
 and full Go-template control flow rather than approximating them.
 
+`docker image inspect` uses the same formatter and returns Docker-shaped image
+metadata. `docker images` and `docker image ls` render Docker columns, quiet
+IDs, digest/no-truncation output, JSON lines, or the supported image fields.
+
 ## Links
 
 - [Landing page (this site)](https://appautomaton.github.io/docker-for-apple-container/): overview, install steps, FAQ, command-tier table.

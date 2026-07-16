@@ -52,6 +52,54 @@ def omit_path(item, path):
     current.pop(parts[-1], None)
 
 
+def image_record(reference):
+    fill = "b" if "multi" not in reference else "c"
+    digest = "sha256:" + fill * 64
+    entrypoint = ["docker-entrypoint.sh"]
+    variants = []
+    for arch in ("arm64", "amd64"):
+        variant_entrypoint = (
+            [f"/{arch}-entrypoint"] if "multi" in reference else entrypoint
+        )
+        variants.append(
+            {
+                "digest": "sha256:" + ("d" if arch == "arm64" else "e") * 64,
+                "platform": {"os": "linux", "architecture": arch},
+                "size": 12345678,
+                "config": {
+                    "architecture": arch,
+                    "os": "linux",
+                    "created": "2026-01-02T03:04:05Z",
+                    "config": {
+                        "Entrypoint": variant_entrypoint,
+                        "Cmd": ["serve"],
+                        "Env": ["PATH=/usr/bin", "APP_ENV=production"],
+                        "WorkingDir": "/app",
+                        "User": "1000:1000",
+                        "Labels": {"org.example.role": "app"},
+                    },
+                    "rootfs": {
+                        "type": "layers",
+                        "diff_ids": ["sha256:" + "f" * 64],
+                    },
+                },
+            }
+        )
+    return {
+        "id": digest,
+        "configuration": {
+            "name": reference,
+            "creationDate": "2026-01-02T03:04:05Z",
+            "descriptor": {
+                "digest": digest,
+                "mediaType": "application/vnd.oci.image.index.v1+json",
+                "size": 12345678,
+            },
+        },
+        "variants": variants,
+    }
+
+
 args = sys.argv[1:]
 if CALL_LOG:
     log = Path(CALL_LOG)
@@ -71,20 +119,16 @@ if args[:2] == ["system", "status"]:
     raise SystemExit(0)
 
 if args[:2] == ["image", "inspect"]:
+    images = args[2:]
+    print(json.dumps([image_record(image) for image in images]))
+    raise SystemExit(0)
+
+if args[:2] == ["image", "list"]:
     print(
         json.dumps(
             [
-                {
-                    "variants": [
-                        {
-                            "config": {
-                                "config": {
-                                    "Entrypoint": ["docker-entrypoint.sh"]
-                                }
-                            }
-                        }
-                    ]
-                }
+                image_record("example/app:1.0"),
+                image_record("example/multi:latest"),
             ]
         )
     )
@@ -267,10 +311,6 @@ if args and args[0] == "copy":
 
 if args and args[0] == "stats":
     print("STATS " + " ".join(args[1:]))
-    raise SystemExit(0)
-
-if args and args[:2] == ["image", "list"]:
-    print("IMAGE-LIST " + " ".join(args[2:]))
     raise SystemExit(0)
 
 if args and args[:2] == ["image", "rm"]:
@@ -661,11 +701,6 @@ class CLIContractTests(ShimCLITestCase):
     def test_cp_archive_flag_is_refused(self) -> None:
         result = self.docker("cp", "-a", "foo.txt", "test-container:/tmp")
         self.assertEqual(result.returncode, 64)
-
-    def test_images_go_template_format_is_refused(self) -> None:
-        result = self.docker("images", "--format", "{{.Repository}}")
-        self.assertEqual(result.returncode, 64)
-        self.assertIn("json|table|yaml|toml", result.stderr)
 
     def test_restart_composes_stop_then_start(self) -> None:
         self.docker("run", "-d", "--name", "r1", "alpine", "sleep", "infinity")

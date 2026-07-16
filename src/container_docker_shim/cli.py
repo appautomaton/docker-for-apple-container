@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import datetime
 import json
 import os
+import platform as host_platform
 import re
 import subprocess
 import sys
@@ -459,33 +461,201 @@ def _format_row(template: str, row: dict[str, Any]) -> str:
     return rendered
 
 
-def _extract_entrypoint(image: Any) -> Any:
-    candidates = [
-        ("Config", "Entrypoint"),
-        ("config", "Entrypoint"),
-        ("config", "entrypoint"),
-        ("config", "config", "Entrypoint"),
-        ("config", "config", "entrypoint"),
-        ("configuration", "entrypoint"),
-        ("configuration", "Entrypoint"),
-        ("image", "config", "Entrypoint"),
-        ("image", "config", "entrypoint"),
+def _split_image_reference(reference: str) -> tuple[str, str]:
+    without_digest = reference.split("@", 1)[0]
+    last_slash = without_digest.rfind("/")
+    last_colon = without_digest.rfind(":")
+    if last_colon > last_slash:
+        return without_digest[:last_colon], without_digest[last_colon + 1:]
+    return without_digest, "latest"
+
+
+def _parse_timestamp(value: Any) -> datetime.datetime | None:
+    raw = str(value or "").strip()
+    if not raw or raw == DOCKER_ZERO_TIME:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed
+
+
+def _human_age(value: Any) -> str:
+    parsed = _parse_timestamp(value)
+    if parsed is None:
+        return ""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    seconds = max(0, int((now - parsed).total_seconds()))
+    units = (
+        (365 * 24 * 60 * 60, "year"),
+        (30 * 24 * 60 * 60, "month"),
+        (24 * 60 * 60, "day"),
+        (60 * 60, "hour"),
+        (60, "minute"),
+    )
+    for length, name in units:
+        if seconds >= length:
+            count = seconds // length
+            suffix = "" if count == 1 else "s"
+            return f"{count} {name}{suffix} ago"
+    return f"{seconds} second{'s' if seconds != 1 else ''} ago"
+
+
+def _human_size(value: Any) -> str:
+    try:
+        size = max(0, int(value or 0))
+    except (TypeError, ValueError):
+        size = 0
+    units = ("B", "kB", "MB", "GB", "TB", "PB")
+    amount = float(size)
+    unit = units[0]
+    for unit in units:
+        if amount < 1000 or unit == units[-1]:
+            break
+        amount /= 1000
+    if unit == "B":
+        return f"{int(amount)}B"
+    rendered = f"{amount:.1f}".rstrip("0").rstrip(".")
+    return f"{rendered}{unit}"
+
+
+def _platform_tuple(value: str) -> tuple[str, str, str]:
+    parts = value.split("/")
+    if len(parts) not in (2, 3) or not all(parts):
+        raise ShimError(
+            f"invalid platform {value!r}; expected os/arch[/variant]", 64
+        )
+    return parts[0], parts[1], parts[2] if len(parts) == 3 else ""
+
+
+def _host_image_platform() -> tuple[str, str, str]:
+    machine = host_platform.machine().lower()
+    arch = {"x86_64": "amd64", "aarch64": "arm64"}.get(machine, machine)
+    return "linux", arch, ""
+
+
+def _select_image_variant(
+    item: dict[str, Any], requested_platform: str | None
+) -> dict[str, Any]:
+    variants = [
+        variant
+        for variant in item.get("variants") or []
+        if isinstance(variant, dict)
     ]
-    for path in candidates:
-        value = _deep_get(image, *path)
-        if value is not None:
-            return value
-    for key in ("entrypoint", "Entrypoint"):
-        if isinstance(image, dict) and key in image:
-            return image[key]
-    if isinstance(image, dict) and isinstance(image.get("variants"), list):
-        for variant in image["variants"]:
-            if not isinstance(variant, dict):
-                continue
-            value = _extract_entrypoint(variant)
-            if value is not None:
-                return value
-    return None
+    if not variants:
+        return {}
+    wanted = (
+        _platform_tuple(requested_platform)
+        if requested_platform is not None
+        else _host_image_platform()
+    )
+    for variant in variants:
+        platform = variant.get("platform") or {}
+        candidate = (
+            str(platform.get("os") or ""),
+            str(platform.get("architecture") or ""),
+            str(platform.get("variant") or ""),
+        )
+        if candidate[:2] == wanted[:2] and (
+            not wanted[2] or candidate[2] == wanted[2]
+        ):
+            return variant
+    if requested_platform is not None:
+        raise ShimError(f"image has no platform matching {requested_platform}", 1)
+    return variants[0]
+
+
+def _docker_image_object(
+    item: dict[str, Any], requested_platform: str | None
+) -> dict[str, Any]:
+    configuration = item.get("configuration") or {}
+    if not isinstance(configuration, dict):
+        configuration = {}
+    descriptor = configuration.get("descriptor") or {}
+    if not isinstance(descriptor, dict):
+        descriptor = {}
+    variant = _select_image_variant(item, requested_platform)
+    variant_config = variant.get("config") or {}
+    if not isinstance(variant_config, dict):
+        variant_config = {}
+    config = variant_config.get("config") or {}
+    if not isinstance(config, dict):
+        config = {}
+    rootfs = variant_config.get("rootfs") or {}
+    if not isinstance(rootfs, dict):
+        rootfs = {}
+    platform = variant.get("platform") or {}
+    if not isinstance(platform, dict):
+        platform = {}
+
+    reference = str(configuration.get("name") or item.get("name") or "")
+    repository, _tag = _split_image_reference(reference) if reference else ("", "")
+    digest = str(descriptor.get("digest") or item.get("id") or "")
+    created = str(
+        variant_config.get("created")
+        or configuration.get("creationDate")
+        or DOCKER_ZERO_TIME
+    )
+    size = int(variant.get("size") or descriptor.get("size") or 0)
+    repo_tags = [reference] if reference and "@" not in reference else []
+    repo_digests = [f"{repository}@{digest}"] if repository and digest else []
+
+    return {
+        "Id": digest,
+        "RepoTags": repo_tags,
+        "RepoDigests": repo_digests,
+        "Created": created,
+        "Size": size,
+        "VirtualSize": size,
+        "Architecture": str(
+            platform.get("architecture")
+            or variant_config.get("architecture")
+            or ""
+        ),
+        "Os": str(platform.get("os") or variant_config.get("os") or ""),
+        "Variant": str(platform.get("variant") or ""),
+        "Config": {
+            "Entrypoint": config.get("Entrypoint"),
+            "Cmd": config.get("Cmd"),
+            "Env": config.get("Env"),
+            "WorkingDir": config.get("WorkingDir") or "",
+            "User": config.get("User") or "",
+            "Labels": config.get("Labels"),
+        },
+        "RootFS": {
+            "Type": rootfs.get("type") or "layers",
+            "Layers": rootfs.get("diff_ids") or [],
+        },
+    }
+
+
+def _docker_image_list_row(item: dict[str, Any], *, no_trunc: bool) -> dict[str, Any]:
+    configuration = item.get("configuration") or {}
+    if not isinstance(configuration, dict):
+        configuration = {}
+    descriptor = configuration.get("descriptor") or {}
+    if not isinstance(descriptor, dict):
+        descriptor = {}
+    reference = str(configuration.get("name") or item.get("name") or "")
+    repository, tag = (
+        _split_image_reference(reference) if reference else ("<none>", "<none>")
+    )
+    digest = str(descriptor.get("digest") or item.get("id") or "")
+    image_id = digest if no_trunc else digest.removeprefix("sha256:")[:12]
+    created = str(configuration.get("creationDate") or DOCKER_ZERO_TIME)
+    size = int(descriptor.get("size") or 0)
+    return {
+        "ID": image_id,
+        "Repository": repository,
+        "Tag": tag,
+        "Digest": digest,
+        "CreatedSince": _human_age(created),
+        "CreatedAt": created,
+        "Size": _human_size(size),
+    }
 
 
 def _docker_inspect_object(row: dict[str, Any]) -> dict[str, Any]:
@@ -530,14 +700,16 @@ def _docker_inspect_object(row: dict[str, Any]) -> dict[str, Any]:
 _INSPECT_PATH_SEGMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
-def _compile_inspect_template(template: str) -> list[tuple[str, Any, bool]]:
+def _compile_template(
+    template: str, *, subject: str
+) -> list[tuple[str, Any, bool]]:
     tokens: list[tuple[str, Any, bool]] = []
     cursor = 0
     while cursor < len(template):
         start = template.find("{{", cursor)
         stray_close = template.find("}}", cursor)
         if stray_close != -1 and (start == -1 or stray_close < start):
-            raise ShimError("malformed inspect format: unmatched '}}'", 64)
+            raise ShimError(f"malformed {subject} format: unmatched '}}'", 64)
         if start == -1:
             tokens.append(("literal", template[cursor:], False))
             break
@@ -546,11 +718,11 @@ def _compile_inspect_template(template: str) -> list[tuple[str, Any, bool]]:
 
         end = template.find("}}", start + 2)
         if end == -1:
-            raise ShimError("malformed inspect format: unmatched '{{'", 64)
+            raise ShimError(f"malformed {subject} format: unmatched '{{'", 64)
         expression = template[start + 2:end].strip()
         if not expression or "{{" in expression:
             raise ShimError(
-                f"unsupported inspect format expression: {expression!r}", 64
+                f"unsupported {subject} format expression: {expression!r}", 64
             )
 
         parts = expression.split()
@@ -561,7 +733,9 @@ def _compile_inspect_template(template: str) -> list[tuple[str, Any, bool]]:
             use_json = True
             path = parts[1]
         else:
-            raise ShimError(f"unsupported inspect format expression: {expression}", 64)
+            raise ShimError(
+                f"unsupported {subject} format expression: {expression}", 64
+            )
 
         if path == ".":
             segments: tuple[str, ...] = ()
@@ -570,28 +744,33 @@ def _compile_inspect_template(template: str) -> list[tuple[str, Any, bool]]:
             if not segments or any(
                 not _INSPECT_PATH_SEGMENT.fullmatch(segment) for segment in segments
             ):
-                raise ShimError(f"unsupported inspect field path: {path}", 64)
+                raise ShimError(f"unsupported {subject} field path: {path}", 64)
         else:
-            raise ShimError(f"unsupported inspect format expression: {expression}", 64)
+            raise ShimError(
+                f"unsupported {subject} format expression: {expression}", 64
+            )
 
         tokens.append((path, segments, use_json))
         cursor = end + 2
     return tokens
 
 
-def _inspect_field_value(
-    obj: dict[str, Any], path: str, segments: tuple[str, ...]
+def _template_field_value(
+    obj: dict[str, Any], path: str, segments: tuple[str, ...], *, subject: str
 ) -> Any:
     value: Any = obj
     for segment in segments:
         if not isinstance(value, dict) or segment not in value:
-            raise ShimError(f"unsupported inspect field: {path}", 64)
+            raise ShimError(f"unsupported {subject} field: {path}", 64)
         value = value[segment]
     return value
 
 
-def _render_inspect_template(
-    tokens: list[tuple[str, Any, bool]], obj: dict[str, Any]
+def _render_template(
+    tokens: list[tuple[str, Any, bool]],
+    obj: dict[str, Any],
+    *,
+    subject: str,
 ) -> str:
     rendered: list[str] = []
     for token, payload, use_json in tokens:
@@ -600,7 +779,7 @@ def _render_inspect_template(
             continue
 
         path = token
-        value = _inspect_field_value(obj, path, payload)
+        value = _template_field_value(obj, path, payload, subject=subject)
         if use_json:
             rendered.append(
                 json.dumps(value, ensure_ascii=False, separators=(",", ":"))
@@ -611,7 +790,8 @@ def _render_inspect_template(
             rendered.append("")
         elif isinstance(value, (dict, list)):
             raise ShimError(
-                f"inspect field {path} is a composite value; use '{{{{json {path}}}}}'",
+                f"{subject} field {path} is a composite value; "
+                f"use '{{{{json {path}}}}}'",
                 64,
             )
         else:
@@ -676,20 +856,7 @@ def cmd_image(argv: list[str]) -> int:
     if sub == "inspect":
         return cmd_image_inspect(argv[1:])
     if sub in ("ls", "list"):
-        rest_img = argv[1:]
-        for idx, token in enumerate(rest_img):
-            key, val = _split_long(token)
-            if key == "--format":
-                fmt = val if val is not None else (rest_img[idx + 1] if idx + 1 < len(rest_img) else "")
-                if _is_go_template(fmt):
-                    return _die(
-                        "docker images Go-template --format is unsupported by Apple "
-                        "container; --format accepts json|table|yaml|toml",
-                        64,
-                    )
-        result = _run_container_capture(["image", "list", *rest_img])
-        _print_completed(result)
-        return result.returncode
+        return cmd_image_list(argv[1:])
     if sub in ("pull", "rm", "tag", "push", "save", "load", "prune"):
         result = _run_container_capture(["image", sub, *argv[1:]])
         _print_completed(result)
@@ -698,23 +865,40 @@ def cmd_image(argv: list[str]) -> int:
 
 
 def cmd_image_inspect(argv: list[str]) -> int:
-    fmt = None
+    fmt: str | None = None
+    requested_platform: str | None = None
     images: list[str] = []
     i = 0
     while i < len(argv):
-        arg, value = _split_long(argv[i])
-        if arg == "--format":
+        raw = argv[i]
+        arg, value = _split_long(raw)
+        if raw == "-f":
+            fmt, i = _take_value(argv, i, "-f")
+            continue
+        if raw.startswith("-f") and not raw.startswith("--"):
+            fmt = raw[2:]
+            if fmt.startswith("="):
+                fmt = fmt[1:]
+        elif arg == "--format":
             fmt = value
             if fmt is None:
                 fmt, i = _take_value(argv, i, "--format")
                 continue
-        elif argv[i].startswith("-"):
-            return _die(f"unsupported image inspect option: {argv[i]}", 64)
+        elif arg == "--platform":
+            requested_platform = value
+            if requested_platform is None:
+                requested_platform, i = _take_value(argv, i, "--platform")
+                continue
+        elif raw.startswith("-"):
+            return _die(f"unsupported image inspect option: {raw}", 64)
         else:
-            images.append(argv[i])
+            images.append(raw)
         i += 1
     if not images:
         return _die("image inspect requires an image", 64)
+    template = None
+    if fmt is not None and fmt != "json":
+        template = _compile_template(fmt, subject="image inspect")
 
     result = _run_container_capture(["image", "inspect", *images])
     if result.returncode != 0:
@@ -725,14 +909,105 @@ def cmd_image_inspect(argv: list[str]) -> int:
     except ValueError as exc:
         return _die(f"could not parse image inspect JSON: {exc}")
     items = data if isinstance(data, list) else [data]
+    objects = [
+        _docker_image_object(item, requested_platform)
+        for item in items
+        if isinstance(item, dict)
+    ]
 
-    if fmt:
-        if fmt == "{{json .Config.Entrypoint}}":
-            entrypoint = _extract_entrypoint(items[0] if items else {})
-            print(json.dumps(entrypoint))
-            return 0
-        return _die(f"unsupported image inspect format: {fmt}", 64)
-    print(json.dumps(items, indent=2))
+    if fmt == "json":
+        for obj in objects:
+            print(json.dumps(obj, ensure_ascii=False, separators=(",", ":")))
+        return 0
+    if template is not None:
+        output = [
+            _render_template(template, obj, subject="image inspect")
+            for obj in objects
+        ]
+        for line in output:
+            print(line)
+        return 0
+    print(json.dumps(objects, indent=2))
+    return 0
+
+
+def cmd_image_list(argv: list[str]) -> int:
+    fmt: str | None = None
+    quiet = False
+    no_trunc = False
+    show_digests = False
+    i = 0
+    while i < len(argv):
+        raw = argv[i]
+        arg, value = _split_long(raw)
+        if arg in ("-q", "--quiet"):
+            quiet = True
+        elif arg == "--no-trunc":
+            no_trunc = True
+        elif arg == "--digests":
+            show_digests = True
+        elif arg == "--format":
+            fmt = value
+            if fmt is None:
+                fmt, i = _take_value(argv, i, "--format")
+                continue
+        elif raw.startswith("-"):
+            return _die(f"unsupported image list option: {raw}", 64)
+        else:
+            return _die(f"image list repository filters are unsupported: {raw}", 64)
+        i += 1
+
+    template = None
+    if fmt is not None and fmt != "json":
+        if fmt.startswith("table"):
+            return _die("image list table templates are not supported", 64)
+        template = _compile_template(fmt, subject="image list")
+
+    result = _run_container_capture(["image", "list", "--format", "json"])
+    if result.returncode != 0:
+        _print_completed(result)
+        return result.returncode
+    try:
+        data = json.loads(result.stdout or "[]")
+    except ValueError as exc:
+        return _die(f"could not parse image list JSON: {exc}")
+    if isinstance(data, dict):
+        data = data.get("images") or data.get("items") or [data]
+    if not isinstance(data, list):
+        data = []
+    rows = [
+        _docker_image_list_row(item, no_trunc=no_trunc)
+        for item in data
+        if isinstance(item, dict)
+    ]
+
+    if quiet:
+        for row in rows:
+            print(row["ID"])
+        return 0
+    if fmt == "json":
+        for row in rows:
+            print(json.dumps(row, ensure_ascii=False, separators=(",", ":")))
+        return 0
+    if template is not None:
+        output = [
+            _render_template(template, row, subject="image list") for row in rows
+        ]
+        for line in output:
+            print(line)
+        return 0
+
+    headers = ["REPOSITORY", "TAG"]
+    if show_digests:
+        headers.append("DIGEST")
+    headers.extend(["IMAGE ID", "CREATED", "SIZE"])
+    print("\t".join(headers))
+    for row in rows:
+        values = [row["Repository"], row["Tag"]]
+        if show_digests:
+            values.append(row["Digest"])
+        values.extend([row["ID"], row["CreatedSince"], row["Size"]])
+        print("\t".join(values))
     return 0
 
 
@@ -821,7 +1096,9 @@ def cmd_inspect(argv: list[str]) -> int:
         )
     if not ids:
         return _die("inspect requires at least one container", 64)
-    template = _compile_inspect_template(fmt) if fmt is not None else None
+    template = (
+        _compile_template(fmt, subject="inspect") if fmt is not None else None
+    )
 
     objects: list[dict[str, Any]] = []
     for ident in ids:
@@ -840,7 +1117,9 @@ def cmd_inspect(argv: list[str]) -> int:
         objects.append(_docker_inspect_object(row))
 
     if template is not None:
-        output = [_render_inspect_template(template, obj) for obj in objects]
+        output = [
+            _render_template(template, obj, subject="inspect") for obj in objects
+        ]
         for line in output:
             print(line)
         return 0
@@ -1521,13 +1800,13 @@ def print_help() -> None:
     print("docker-for-apple-container: Docker CLI subset over Apple container")
     print()
     print("Translated:  version, info, build, run, create, ps, inspect,")
-    print("             image inspect, start, exec, stop, restart, rm, logs, cp,")
-    print("             stats, export, login, logout, system prune")
+    print("             images, image inspect, start, exec, stop, restart, rm,")
+    print("             logs, cp, stats, export, login, logout, system prune")
     print("Alias:       container inspect")
     print("Inspect fmt: field paths, literal text, and json; not full Go templates")
     print("Compose:     compose up/down/ps/logs/build/config/ls (stateless;")
     print("             project state lives in Apple container labels)")
-    print("Passthrough: images, pull, push, tag, save, load, rmi, image <sub>,")
+    print("Passthrough: pull, push, tag, save, load, rmi, image <sub>,")
     print("             network <sub>, volume <sub>, kill")
     print("Unsupported Docker commands and flags fail with a clear, explicit error.")
 
