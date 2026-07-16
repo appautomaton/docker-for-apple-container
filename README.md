@@ -175,7 +175,11 @@ read the compose file.
   - *Post-start, for all peers.* After everything is up, the full project's
     lines are appended idempotently into every container via `container exec`
     (IPs read live from `container inspect`), covering peers that aren't
-    declared dependencies.
+    declared dependencies. With multiple networks, each receiver gets a peer's
+    address from the first network they share, matching Docker's network-scoped
+    service discovery instead of leaking an unrelated interface address.
+- **DNS configuration.** Compose `dns`, `dns_search`, and `dns_opt` values are
+  forwarded directly to Apple `container run`, preserving scalar or list order.
 - **`host.docker.internal`.** The same `/etc/hosts` injection also publishes
   `host.docker.internal` and `gateway.docker.internal` pointing at the
   container's gateway, which on Apple `container` **is the macOS host.** This

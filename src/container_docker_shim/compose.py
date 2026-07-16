@@ -55,7 +55,7 @@ import shlex
 import sys
 import threading
 import time
-from typing import Any
+from typing import Any, Optional
 
 from .cli import (
     DOCKER_ZERO_TIME,
@@ -705,6 +705,13 @@ def _build_run_args(
     for net in _service_networks(service, project):
         args.extend(["--network", net])
 
+    for dns in _as_list(spec.get("dns")):
+        args.extend(["--dns", _as_str(dns)])
+    for dns_search in _as_list(spec.get("dns_search")):
+        args.extend(["--dns-search", _as_str(dns_search)])
+    for dns_opt in _as_list(spec.get("dns_opt")):
+        args.extend(["--dns-option", _as_str(dns_opt)])
+
     if spec.get("platform"):
         args.extend(["--platform", _as_str(spec["platform"])])
     if spec.get("user"):
@@ -875,37 +882,57 @@ def _load_labeled_resources(family: str, project: str) -> list[str]:
     return owned
 
 
-def _container_net(name: str) -> tuple[str | None, str | None]:
-    """Return ``(ipv4, gateway)`` for a container's first network, or ``(None, None)``.
+NetworkAttachment = tuple[str, str, Optional[str]]  # (network, ipv4, gateway)
 
-    Both come from the same ``status.networks[]`` block of ``container inspect``
-    so a single call yields the container's own address *and* the gateway —
-    which, on Apple `container`, is the macOS host (Docker Desktop's
-    ``host.docker.internal``). Addresses are stripped of their CIDR suffix.
+
+def _container_networks(name: str) -> list[NetworkAttachment]:
+    """Return all IPv4 network attachments for a container, in runtime order.
+
+    Apple `container inspect` reports addresses under ``status.networks[]``.
+    The order matters: the first network supplies the container's DNS/gateway,
+    while later networks may still be the right service-to-service path. Keep
+    every attachment so /etc/hosts injection can pick an address on a network
+    shared by the target container and each peer.
     """
     result = _run_container_capture(["inspect", name])
     if result.returncode != 0:
-        return None, None
+        return []
     import json
 
     try:
         data = json.loads(result.stdout or "[]")
     except ValueError:
-        return None, None
+        return []
     item = data[0] if isinstance(data, list) and data else data
     if not isinstance(item, dict):
-        return None, None
+        return []
     networks = (item.get("status") or {}).get("networks") or []
+    attachments: list[NetworkAttachment] = []
     for net in networks:
         if not isinstance(net, dict):
             continue
+        network = net.get("network")
         addr = net.get("ipv4Address")
+        if not network or not addr:
+            continue
         gateway = net.get("ipv4Gateway")
-        if addr:
-            ip = str(addr).split("/")[0]
-            gw = str(gateway).split("/")[0] if gateway else None
-            return ip, gw
-    return None, None
+        ip = str(addr).split("/")[0]
+        gw = str(gateway).split("/")[0] if gateway else None
+        attachments.append((str(network), ip, gw))
+    return attachments
+
+
+def _container_net(name: str) -> tuple[str | None, str | None]:
+    """Return ``(ipv4, gateway)`` for a container's first network, if any.
+
+    Kept as a small compatibility helper for call sites that only need the
+    container's primary address/gateway.
+    """
+    networks = _container_networks(name)
+    if not networks:
+        return None, None
+    _network, ip, gateway = networks[0]
+    return ip, gateway
 
 
 # ========================================================================== #
@@ -997,15 +1024,33 @@ def _cp_hosts_fallback(name: str, lines: list[str], managed: list[str]) -> bool:
         return _run_container_capture(["cp", local, f"{name}:/etc/hosts"]).returncode == 0
 
 
+def _select_shared_attachment(
+    target_network_order: list[str], peer_networks: list[NetworkAttachment]
+) -> tuple[str | None, str | None]:
+    """Return ``(peer_ip, peer_gateway)`` on the first network shared by target.
+
+    Docker's embedded DNS only resolves service names on networks shared by
+    the caller and callee. Apple `container` has no embedded DNS, so the shim's
+    /etc/hosts entries must follow the same rule. This is especially important
+    for a service attached to ``[egress, private]``: its first address can reach
+    the Internet, but a private-only peer must resolve it to the private address.
+    """
+    by_network = {network: (ip, gateway) for network, ip, gateway in peer_networks}
+    for network in target_network_order:
+        hit = by_network.get(network)
+        if hit:
+            return hit
+    return None, None
+
+
 def _boot_hosts_lines(
     service: Service,
     project: Project,
-    ip_by_service: dict[str, str],
-    gateway_ip: str | None,
+    nets_by_service: dict[str, list[NetworkAttachment]],
 ) -> list[str]:
     """/etc/hosts lines a dependent service needs before its entrypoint runs.
 
-    Dependencies started earlier in this `up` are in ``ip_by_service``; a
+    Dependencies started earlier in this `up` are in ``nets_by_service``; a
     dependency excluded by a partial `up <service>` may still be running from
     a previous `up`, so fall back to inspecting it live. Services without
     ``depends_on`` return [] — for them post-start injection is the whole
@@ -1013,22 +1058,25 @@ def _boot_hosts_lines(
     """
     if not service.depends_on or service.spec.get(BOOT_HOSTS_KEY) is False:
         return []
+    target_networks = _service_networks(service, project)
     lines: list[str] = []
-    gateway = gateway_ip
+    gateway: str | None = None
     for dep in dict.fromkeys(service.depends_on):
-        ip = ip_by_service.get(dep)
-        if ip is None:
+        dep_networks = nets_by_service.get(dep)
+        if dep_networks is None:
             dep_service = project.services.get(dep)
             if dep_service is None:
                 continue  # depends_on a service not defined here — ignore, like Docker
             dep_name = dep_service.container_name or f"{project.name}-{dep}-1"
-            ip, dep_gateway = _container_net(dep_name)
-            gateway = gateway or dep_gateway
+            dep_networks = _container_networks(dep_name)
+        ip, dep_gateway = _select_shared_attachment(target_networks, dep_networks)
+        gateway = gateway or dep_gateway
         if ip:
             lines.append(f"{ip} {dep}")
         else:
             _warn(
-                f"service {service.name!r}: dependency {dep!r} has no address yet — "
+                f"service {service.name!r}: dependency {dep!r} has no shared "
+                "address yet — "
                 f"{dep!r} will only resolve after post-start injection"
             )
     if lines and gateway:
@@ -1115,19 +1163,21 @@ def _image_default_argv(image: str, platform_hint: str | None) -> tuple[list[str
 def _inject_etc_hosts(
     project: Project,
     services: list[Service],
-    net_info: dict[str, tuple[str | None, str | None]] | None = None,
+    net_info: dict[str, list[NetworkAttachment]] | None = None,
 ) -> None:
     """Populate each container's own /etc/hosts with peer + host-gateway names.
 
     Two things are injected per container, via `container exec`:
 
     1. **Peer service names** (``<ip> <service>``) so services resolve each
-       other by name — only meaningful when the project has ≥2 services.
+       other by name — only meaningful when the project has ≥2 services. When
+       services have multiple networks, each receiver gets the peer address on
+       a network they actually share, mirroring Docker's embedded DNS.
     2. **``host.docker.internal`` / ``gateway.docker.internal``** → the
-       container's gateway, which on Apple `container` *is* the macOS host.
-       This mirrors Docker Desktop, so images that dial the host by that name
-       (a very common Docker-on-Mac assumption) work unchanged. Injected even
-       for single-service projects.
+       container's first-network gateway, which on Apple `container` *is* the
+       macOS host. This mirrors Docker Desktop, so images that dial the host by
+       that name (a very common Docker-on-Mac assumption) work unchanged.
+       Injected even for single-service projects.
 
     All writes land in **each container's ephemeral /etc/hosts**, discarded on
     removal — the macOS host's /etc/hosts is never read or written. Managed
@@ -1142,39 +1192,49 @@ def _inject_etc_hosts(
     ``net_info`` carries addresses already inspected by the caller (keyed by
     container name); anything missing is inspected here.
     """
-    info: dict[str, tuple[str | None, str | None]] = dict(net_info or {})
+    info: dict[str, list[NetworkAttachment]] = dict(net_info or {})
     named: list[tuple[Service, str]] = []
-    peers: list[tuple[str, str]] = []
     for service in services:
         name = service.container_name or f"{project.name}-{service.name}-1"
         if name not in info:
-            info[name] = _container_net(name)
+            info[name] = _container_networks(name)
         named.append((service, name))
-        ip = info[name][0]
-        if ip:
-            peers.append((service.name, ip))
-
-    peer_lines = [f"{ip} {svc}" for svc, ip in peers] if len(peers) >= 2 else []
 
     for service, name in named:
-        ip, gateway = info[name]
-        if ip is None:
+        networks = info[name]
+        if not networks:
             continue  # not running — nothing to write into
-        lines = list(peer_lines)
+        target_networks = [network for network, _ip, _gateway in networks]
+        gateway = networks[0][2]
+        lines: list[str] = []
+        if len(named) >= 2:
+            for peer_service, peer_name in named:
+                peer_ip, _peer_gateway = _select_shared_attachment(
+                    target_networks, info.get(peer_name, [])
+                )
+                if peer_ip:
+                    lines.append(f"{peer_ip} {peer_service.name}")
         if gateway:
             lines.append(f"{gateway} {_HOST_ALIASES}")
         if not lines:
             continue
-        managed = [word for line in lines for word in line.split()[1:]]
-        pattern = "(^|[[:space:]])(" + "|".join(re.escape(w) for w in managed) + ")([[:space:]]|$)"
+        managed = (
+            [svc.name for svc, _name in named] if len(named) >= 2 else []
+        ) + _HOST_ALIASES.split()
+        pattern = (
+            "(^|[[:space:]])("
+            + "|".join(re.escape(word) for word in managed)
+            + ")([[:space:]]|$)"
+        )
         # Rewrite: strip every line mentioning a managed name, append fresh
         # ones. grep -v exiting 1 (nothing left) is fine — appends still run.
+        appends = "".join(
+            f"; printf '%s\\n' {shlex.quote(line)} >> \"$tmp\"" for line in lines
+        )
         script = (
             'tmp="$(mktemp)"; '
-            f'grep -vE {shlex.quote(pattern)} /etc/hosts > "$tmp"; '
-            + "; ".join(
-                f"printf '%s\\n' {shlex.quote(line)} >> \"$tmp\"" for line in lines
-            )
+            f'grep -vE {shlex.quote(pattern)} /etc/hosts > "$tmp"'
+            + appends
             + '; cat "$tmp" > /etc/hosts; rm -f "$tmp"'
         )
         result = _run_container_capture(["exec", name, "sh", "-c", script])
@@ -1243,13 +1303,12 @@ def cmd_up(project: Project, *, detach: bool, build: bool, only: list[str], no_b
     ensured_volumes: set[str] = set()
     warned: set[str] = set()
     started: list[Service] = []
-    net_info: dict[str, tuple[str | None, str | None]] = {}
-    ip_by_service: dict[str, str] = {}
-    gateway_ip: str | None = None
+    net_info: dict[str, list[NetworkAttachment]] = {}
+    nets_by_service: dict[str, list[NetworkAttachment]] = {}
     depended_on = {dep for svc in services for dep in svc.depends_on}
     for service in services:
         image = _resolve_image(service, project, build=build, no_build=no_build)
-        boot_hosts = _boot_hosts_lines(service, project, ip_by_service, gateway_ip)
+        boot_hosts = _boot_hosts_lines(service, project, nets_by_service)
         run_args, wrapped = _build_run_args(
             service,
             project,
@@ -1284,17 +1343,16 @@ def cmd_up(project: Project, *, detach: bool, build: bool, only: list[str], no_b
         # Learn this container's address now so later dependents can bake it
         # into their boot-time /etc/hosts (retry briefly — the address can lag
         # `run` returning by a beat, and a dependent needs it).
-        ip, gateway = _container_net(name)
-        if ip is None and service.name in depended_on:
+        networks = _container_networks(name)
+        if not networks and service.name in depended_on:
             for _ in range(3):
                 time.sleep(0.3)
-                ip, gateway = _container_net(name)
-                if ip:
+                networks = _container_networks(name)
+                if networks:
                     break
-        net_info[name] = (ip, gateway)
-        if ip:
-            ip_by_service[service.name] = ip
-        gateway_ip = gateway_ip or gateway
+        net_info[name] = networks
+        if networks:
+            nets_by_service[service.name] = networks
 
     # Whole project, not just `started`: a partial `up <svc>` must give the
     # fresh container ALL peer names, and rewrite the recreated service's new

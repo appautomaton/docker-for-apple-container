@@ -42,9 +42,11 @@ STATE = Path(os.environ["FAKE_CONTAINER_STATE"])
 
 def load():
     try:
-        return json.loads(STATE.read_text())
+        d = json.loads(STATE.read_text())
     except FileNotFoundError:
-        return {"containers": {}, "networks": {}, "volumes": {}, "ip": 1, "exec_log": []}
+        d = {"containers": {}, "networks": {}, "volumes": {}, "ip": 1, "exec_log": []}
+    d.setdefault("net_index", {})
+    return d
 
 
 def save(d):
@@ -67,11 +69,19 @@ if a[:2] == ["system", "status"]:
 
 if a[:1] == ["run"]:
     d = load()
-    name = None; labels = {}; networks = []; image = None; cmd = []; entry = None
+    name = None
+    labels = {}
+    networks = []
+    dns = []
+    dns_search = []
+    dns_opt = []
+    image = None
+    cmd = []
+    entry = None
     value = {"--name","--label","--network","-e","--env","-p","--publish","-v",
              "--mount","--tmpfs","--cpus","--memory","--user","-w","--workdir",
              "--cwd","--entrypoint","--platform","--cap-add","--cap-drop",
-             "--ulimit","--shm-size"}
+             "--ulimit","--shm-size","--dns","--dns-search","--dns-option"}
     boolean = {"-d","-i","-t","--init","--read-only","--rm","--no-dns"}
     i = 1
     while i < len(a):
@@ -85,22 +95,33 @@ if a[:1] == ["run"]:
             elif key == "--label":
                 k, _, val = v.partition("="); labels[k] = val
             elif key == "--network": networks.append(v)
+            elif key == "--dns": dns.append(v)
+            elif key == "--dns-search": dns_search.append(v)
+            elif key == "--dns-option": dns_opt.append(v)
             elif key == "--entrypoint": entry = v
             continue
         image = arg; cmd = a[i+1:]; break
     if not name:
         name = "fake-%d" % len(d["containers"])
-    ip = "192.168.65.%d" % d["ip"]; d["ip"] += 1
+    if not networks:
+        networks = ["default"]
+    status_networks = []
+    for net in networks:
+        if net not in d["net_index"]:
+            d["net_index"][net] = 65 + len(d["net_index"])
+        octet = d["net_index"][net]
+        ip = "192.168.%d.%d" % (octet, d["ip"]); d["ip"] += 1
+        status_networks.append({"network": net,
+                                "ipv4Address": ip + "/24",
+                                "ipv4Gateway": "192.168.%d.1" % octet})
     d["containers"][name] = {
         "id": name, "name": name, "image": image or "",
-        "labels": labels, "networks": networks,
+        "labels": labels, "networks": networks, "dns": dns,
+        "dns_search": dns_search, "dns_opt": dns_opt,
         "entrypoint": entry, "cmd": cmd,
         "configuration": {"id": name, "labels": labels,
                           "image": {"reference": image or ""}},
-        "status": {"state": "running",
-                   "networks": [{"network": networks[0] if networks else "default",
-                                 "ipv4Address": ip + "/24",
-                                 "ipv4Gateway": "192.168.65.1"}]},
+        "status": {"state": "running", "networks": status_networks},
     }
     save(d); print(name); raise SystemExit(0)
 
@@ -509,6 +530,103 @@ class ComposeE2ETests(unittest.TestCase):
         # `image inspect`) + the compose command — string form shell-split,
         # never sh -c wrapped, replacing the image CMD.
         self.assertEqual(web["cmd"][2:], ["sh", "/entry", "--flag", "on"])
+
+    def test_compose_dns_options_are_forwarded_to_container_run(self) -> None:
+        self.write_compose(
+            """
+            services:
+              resolver:
+                image: nginx:latest
+                dns: [1.1.1.1, 8.8.8.8]
+                dns_search: [svc.local]
+                dns_opt: [use-vc]
+            """
+        )
+        result = self.docker("compose", "up", "-d")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resolver = self.load_state()["containers"]["demo-resolver-1"]
+        self.assertEqual(resolver["dns"], ["1.1.1.1", "8.8.8.8"])
+        self.assertEqual(resolver["dns_search"], ["svc.local"])
+        self.assertEqual(resolver["dns_opt"], ["use-vc"])
+
+    def test_multi_network_injection_uses_shared_peer_addresses(self) -> None:
+        # A service can put its Internet-facing network first for DNS/egress,
+        # while private-only peers must still resolve it to the shared private
+        # address. This mirrors Docker DNS behavior per receiver network.
+        self.write_compose(
+            """
+            services:
+              api:
+                image: nginx:latest
+                networks: [private]
+              proxy:
+                image: nginx:latest
+                networks: [egress, private]
+            networks:
+              private:
+                internal: true
+              egress: {}
+            """
+        )
+        result = self.docker("compose", "up", "-d")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.load_state()
+        proxy_nets = state["containers"]["demo-proxy-1"]["status"]["networks"]
+        proxy_egress_ip = next(
+            n["ipv4Address"].split("/")[0]
+            for n in proxy_nets
+            if n["network"] == "demo_egress"
+        )
+        proxy_private_ip = next(
+            n["ipv4Address"].split("/")[0]
+            for n in proxy_nets
+            if n["network"] == "demo_private"
+        )
+        hosts_writes = [
+            entry
+            for entry in state["exec_log"]
+            if "/etc/hosts" in " ".join(entry["cmd"])
+        ]
+        by_target = {e["container"]: " ".join(e["cmd"]) for e in hosts_writes}
+        self.assertIn(f"{proxy_private_ip} proxy", by_target["demo-api-1"])
+        self.assertNotIn(f"{proxy_egress_ip} proxy", by_target["demo-api-1"])
+
+    def test_boot_hosts_use_shared_dependency_network(self) -> None:
+        # Boot-time dependency injection follows the dependent service's
+        # declared networks, not the dependency's first network.
+        self.write_compose(
+            """
+            services:
+              api:
+                image: nginx:latest
+                depends_on: [proxy]
+                networks: [private]
+              proxy:
+                image: nginx:latest
+                networks: [egress, private]
+            networks:
+              private:
+                internal: true
+              egress: {}
+            """
+        )
+        result = self.docker("compose", "up", "-d")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = self.load_state()
+        proxy_nets = state["containers"]["demo-proxy-1"]["status"]["networks"]
+        proxy_egress_ip = next(
+            n["ipv4Address"].split("/")[0]
+            for n in proxy_nets
+            if n["network"] == "demo_egress"
+        )
+        proxy_private_ip = next(
+            n["ipv4Address"].split("/")[0]
+            for n in proxy_nets
+            if n["network"] == "demo_private"
+        )
+        script = state["containers"]["demo-api-1"]["cmd"][1]
+        self.assertIn(f"{proxy_private_ip} proxy", script)
+        self.assertNotIn(f"{proxy_egress_ip} proxy", script)
 
     def test_partial_up_sees_whole_project_and_refreshes_peers(self) -> None:
         # `up -d web` after a full up: the recreated web (new IP) must still
