@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 
 STATE = Path(os.environ["FAKE_CONTAINER_STATE"])
+CALL_LOG = os.environ.get("FAKE_CONTAINER_CALL_LOG")
 
 
 def load():
@@ -41,7 +42,22 @@ def take(args, i):
     return args[i + 1], i + 2
 
 
+def omit_path(item, path):
+    parts = path.split(".")
+    current = item
+    for part in parts[:-1]:
+        current = current.get(part)
+        if not isinstance(current, dict):
+            return
+    current.pop(parts[-1], None)
+
+
 args = sys.argv[1:]
+if CALL_LOG:
+    log = Path(CALL_LOG)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    with log.open("a") as handle:
+        handle.write(json.dumps(args) + "\n")
 created_mode = False
 if args and args[0] == "create":
     created_mode = True
@@ -166,15 +182,24 @@ if args and args[0] == "list":
     data = load()
     include_all = "--all" in args
     rows = []
-    for item in data["containers"].values():
+    for ident, item in data["containers"].items():
         if include_all or item["status"]["state"] == "running":
-            rows.append(item)
+            row = json.loads(json.dumps(item))
+            for path in (data.get("list_omit") or {}).get(ident, []):
+                omit_path(row, path)
+            rows.append(row)
     print(json.dumps(rows))
     raise SystemExit(0)
 
 if args and args[0] == "inspect":
     data = load()
     ident = args[-1]
+    if ident in data.get("inspect_fail", []):
+        print("Inspect failed", file=sys.stderr)
+        raise SystemExit(1)
+    if ident in data.get("inspect_malformed", []):
+        print("not-json")
+        raise SystemExit(0)
     item = data["containers"].get(ident)
     if not item:
         print("No such container", file=sys.stderr)
@@ -309,6 +334,7 @@ class ShimCLITestCase(unittest.TestCase):
                 # Deliberately set: tests assert the stateless shim never creates it.
                 "CONTAINER_DOCKER_SHIM_STATE_DIR": str(self.root / "shim-state"),
                 "FAKE_CONTAINER_STATE": str(self.root / "fake-state.json"),
+                "FAKE_CONTAINER_CALL_LOG": str(self.root / "fake-calls.jsonl"),
             }
         )
 
@@ -323,6 +349,143 @@ class ShimCLITestCase(unittest.TestCase):
             env=self.env,
             check=False,
         )
+
+    def container_calls(self) -> list[list[str]]:
+        path = Path(self.env["FAKE_CONTAINER_CALL_LOG"])
+        if not path.exists():
+            return []
+        return [json.loads(line) for line in path.read_text().splitlines()]
+
+    def clear_container_calls(self) -> None:
+        Path(self.env["FAKE_CONTAINER_CALL_LOG"]).unlink(missing_ok=True)
+
+    def update_fake_state(self, **updates: object) -> None:
+        path = Path(self.env["FAKE_CONTAINER_STATE"])
+        data = json.loads(path.read_text())
+        data.update(updates)
+        path.write_text(json.dumps(data))
+
+
+class ContainerQueryTests(ShimCLITestCase):
+    """Docker container-list subset backed by Apple list JSON.
+
+    Docker behavior reference:
+    https://docs.docker.com/reference/cli/docker/container/ls/
+    """
+
+    def run_container(self, name: str, *, label: str | None = None) -> None:
+        args = ["run", "-d", "--name", name]
+        if label is not None:
+            args.extend(["--label", label])
+        args.extend(["alpine", "sleep", "infinity"])
+        result = self.docker(*args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_complete_list_rows_do_not_trigger_inspect(self) -> None:
+        self.run_container("running", label="role=worker")
+        created = self.docker("create", "--name", "created", "alpine", "true")
+        self.assertEqual(created.returncode, 0, created.stderr)
+        self.clear_container_calls()
+
+        running = self.docker("ps", "--format", "{{.ID}}")
+        self.assertEqual(running.returncode, 0, running.stderr)
+        self.assertEqual(running.stdout.strip(), "running")
+
+        all_rows = self.docker(
+            "ps",
+            "-a",
+            "--filter",
+            "label=role=worker",
+            "--format",
+            "{{.ID}}\t{{.State}}",
+        )
+        self.assertEqual(all_rows.returncode, 0, all_rows.stderr)
+        self.assertEqual(all_rows.stdout.strip(), "running\trunning")
+
+        quiet = self.docker("ps", "-a", "--quiet")
+        self.assertEqual(quiet.returncode, 0, quiet.stderr)
+        self.assertEqual(quiet.stdout.splitlines(), ["running", "created"])
+
+        self.assertEqual(
+            self.container_calls(),
+            [
+                ["list", "--format", "json"],
+                ["list", "--all", "--format", "json"],
+                ["list", "--all", "--format", "json"],
+            ],
+        )
+
+    def test_only_incomplete_list_rows_are_inspected(self) -> None:
+        paths = (
+            "id",
+            "configuration.image.reference",
+            "status.state",
+            "configuration.labels",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                self.clear_container_calls()
+                Path(self.env["FAKE_CONTAINER_STATE"]).unlink(missing_ok=True)
+                self.run_container("complete", label="role=worker")
+                self.run_container("fallback", label="role=worker")
+                self.update_fake_state(list_omit={"fallback": [path]})
+                self.clear_container_calls()
+
+                result = self.docker(
+                    "ps",
+                    "-a",
+                    "--filter",
+                    "label=role=worker",
+                    "--format",
+                    "{{.ID}}",
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    result.stdout.splitlines(), ["complete", "fallback"]
+                )
+                self.assertEqual(
+                    self.container_calls(),
+                    [
+                        ["list", "--all", "--format", "json"],
+                        ["inspect", "fallback"],
+                    ],
+                )
+
+    def test_failed_or_malformed_fallback_keeps_list_data(self) -> None:
+        for mode in ("inspect_fail", "inspect_malformed"):
+            with self.subTest(mode=mode):
+                self.clear_container_calls()
+                Path(self.env["FAKE_CONTAINER_STATE"]).unlink(missing_ok=True)
+                self.run_container("partial")
+                self.update_fake_state(
+                    list_omit={"partial": ["configuration.labels"]},
+                    **{mode: ["partial"]},
+                )
+                self.clear_container_calls()
+
+                result = self.docker(
+                    "ps", "-a", "--format", "{{.ID}}\t{{.Image}}\t{{.State}}"
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), "partial\talpine\trunning")
+                self.assertEqual(
+                    self.container_calls(),
+                    [
+                        ["list", "--all", "--format", "json"],
+                        ["inspect", "partial"],
+                    ],
+                )
+
+    def test_direct_inspect_still_calls_apple_inspect(self) -> None:
+        self.run_container("direct")
+        self.clear_container_calls()
+
+        result = self.docker(
+            "inspect", "--format", "{{.State.Running}}", "direct"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "true")
+        self.assertEqual(self.container_calls(), [["inspect", "direct"]])
 
 
 class CLIContractTests(ShimCLITestCase):

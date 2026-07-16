@@ -75,6 +75,14 @@ container system start
 Three tiers. Anything outside them fails with an explicit exit-64 error instead
 of pretending to work.
 
+Docker's official CLI reference defines the behavior of the subset documented
+here, including [`docker container ls`](https://docs.docker.com/reference/cli/docker/container/ls/),
+[`docker inspect`](https://docs.docker.com/reference/cli/docker/inspect/), and
+[Docker output formatting](https://docs.docker.com/go/formatting/). Apple
+`container --help` and its runtime JSON define which of those behaviors can be
+translated faithfully. Unlisted Docker behavior is not implied; when no
+verified Apple equivalent exists, the shim refuses it explicitly.
+
 ### Fully translated (the core contract)
 
 - `docker version`

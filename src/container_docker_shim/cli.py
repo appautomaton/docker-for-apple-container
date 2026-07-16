@@ -166,6 +166,21 @@ def _labels_from_item(item: dict[str, Any]) -> dict[str, str]:
     return {}
 
 
+def _item_has_labels(item: dict[str, Any]) -> bool:
+    candidates = (
+        ("labels",),
+        ("Labels",),
+        ("annotations",),
+        ("configuration", "labels"),
+        ("Config", "Labels"),
+    )
+    for path in candidates:
+        raw = _deep_get(item, *path)
+        if isinstance(raw, (dict, list)):
+            return True
+    return False
+
+
 def _deep_get(item: Any, *path: str) -> Any:
     cur = item
     for part in path:
@@ -179,6 +194,34 @@ def _first_present(item: dict[str, Any], keys: tuple[str, ...]) -> Any:
     for key in keys:
         value = item.get(key)
         if value not in (None, ""):
+            return value
+    return None
+
+
+def _state_from_item(item: dict[str, Any]) -> Any:
+    candidates = (
+        _deep_get(item, "status", "state"),
+        _deep_get(item, "Status", "State"),
+        item.get("state"),
+        item.get("State"),
+        item.get("status"),
+        item.get("Status"),
+    )
+    for value in candidates:
+        if value not in (None, "") and not isinstance(value, (dict, list)):
+            return value
+    return None
+
+
+def _image_reference_from_item(item: dict[str, Any]) -> Any:
+    candidates = (
+        item.get("image"),
+        item.get("Image"),
+        _deep_get(item, "configuration", "image", "reference"),
+        _deep_get(item, "image", "reference"),
+    )
+    for value in candidates:
+        if value not in (None, "") and not isinstance(value, (dict, list)):
             return value
     return None
 
@@ -243,14 +286,7 @@ def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
 
     labels = _labels_from_item(item)
 
-    raw_state = (
-        _deep_get(item, "status", "state")
-        or _deep_get(item, "Status", "State")
-        or item.get("state")
-        or item.get("State")
-        or item.get("status")
-        or item.get("Status")
-    )
+    raw_state = _state_from_item(item)
     docker_state = _docker_state(raw_state)
     created_at = str(
         _deep_get(item, "configuration", "creationDate")
@@ -286,13 +322,7 @@ def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
         "id": str(item_id or name),
         "apple_id": str(item_id or name),
         "name": str(name or item_id),
-        "image": str(
-            item.get("image")
-            or item.get("Image")
-            or _deep_get(item, "configuration", "image", "reference")
-            or _deep_get(item, "image", "reference")
-            or ""
-        ),
+        "image": str(_image_reference_from_item(item) or ""),
         "image_id": str(
             _deep_get(item, "configuration", "image", "descriptor", "digest")
             or _deep_get(item, "image", "descriptor", "digest")
@@ -318,6 +348,22 @@ def _normalize_inspect_item(item: dict[str, Any], ident: str) -> dict[str, Any]:
     if not row["name"]:
         row["name"] = ident
     return row
+
+
+def _list_item_is_complete(item: dict[str, Any], row: dict[str, Any]) -> bool:
+    """Whether Apple list JSON has everything current list consumers need.
+
+    Apple container 1.1.0 returns the full configuration and status object from
+    ``container list --format json``. Keep a per-record inspect fallback for a
+    missing identity, image, state, or labels block so newer schemas degrade
+    safely without restoring an inspect call for every listed container.
+    """
+    return bool(
+        row.get("id")
+        and _image_reference_from_item(item) is not None
+        and _state_from_item(item) is not None
+        and _item_has_labels(item)
+    )
 
 
 def _inspect_container_item(ident: str) -> dict[str, Any] | None:
@@ -354,10 +400,16 @@ def _load_container_rows(all_containers: bool) -> tuple[int, list[dict[str, Any]
         if not isinstance(item, dict):
             continue
         row = _normalize_list_item(item)
-        ident = row.get("apple_id") or row.get("id") or row.get("name")
-        inspected = _inspect_container_item(str(ident)) if ident else None
-        if inspected is not None:
-            row = _normalize_inspect_item(inspected, str(ident))
+        if not _list_item_is_complete(item, row):
+            ident = (
+                row.get("apple_id")
+                or row.get("id")
+                or row.get("name")
+                or _deep_get(item, "configuration", "id")
+            )
+            inspected = _inspect_container_item(str(ident)) if ident else None
+            if inspected is not None:
+                row = _normalize_inspect_item(inspected, str(ident))
         rows.append(row)
     return 0, rows, ""
 
