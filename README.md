@@ -77,9 +77,10 @@ of pretending to work.
 
 Docker's official CLI reference defines the behavior of the subset documented
 here, including [`docker container ls`](https://docs.docker.com/reference/cli/docker/container/ls/),
-[`docker inspect`](https://docs.docker.com/reference/cli/docker/inspect/), and
+[`docker inspect`](https://docs.docker.com/reference/cli/docker/inspect/),
 [`docker container exec`](https://docs.docker.com/reference/cli/docker/container/exec/),
 [`docker system df`](https://docs.docker.com/reference/cli/docker/system/df/),
+[`docker compose`](https://docs.docker.com/reference/cli/docker/compose/),
 and [Docker output formatting](https://docs.docker.com/go/formatting/). Apple
 `container --help` and its runtime JSON define which of those behaviors can be
 translated faithfully. Unlisted Docker behavior is not implied; when no
@@ -169,18 +170,31 @@ loudly.
 
 ### Compose (stateless orchestration)
 
-`docker compose up/down/ps/logs/build/config/ls` orchestrate multi-service
-stacks **without persisting any shim-owned state**. Apple `container` has no
-native compose, so the shim parses the compose file and issues a sequence of
-`container` commands, but it keeps no project file. Instead every resource is
-tagged with Docker's own label schema (`com.docker.compose.project`,
+`docker compose up/down/ps/logs/build/pull/exec/start/stop/restart/rm/config/ls`
+orchestrate multi-service stacks **without persisting any shim-owned state**.
+Apple `container` has no native compose, so the shim issues a sequence of
+`container` commands but keeps no project file. Every resource is tagged with
+Docker's own label schema (`com.docker.compose.project`,
 `com.docker.compose.service`, and so on) on the containers, the project network,
-and any named volumes. `down`/`ps`/`logs`/`ls` reconstruct the project purely by
-querying Apple and filtering on those labels. Only `up`/`build`/`config` need to
-read the compose file.
+and any named volumes. Runtime verbs reconstruct membership by querying Apple
+and filtering on those labels. `up`, `pull`, `build`, and `config` require the
+compose file. `start`, `stop`, `restart`, and `rm` use it for dependency order
+when available, then fall back to stable service-name order from labels.
 
 - **Project name** resolves like Docker: `-p NAME` → `COMPOSE_PROJECT_NAME` →
   the file's `name:` → the directory basename.
+- **Common runtime verbs remain stateless.** `exec` resolves one service to its
+  labeled container and defaults to Compose's interactive TTY behavior (`-T`
+  disables the TTY). `start` runs dependencies first; `stop` and `rm` run in
+  reverse order; `restart` stops in reverse and starts forward. Without a file,
+  service-name sorting supplies a deterministic order. `rm` never prompts;
+  `-f` is accepted, and `-s/--stop` stops running services before removal.
+- **Pull uses declared images.** `compose pull [SERVICE...]` reads the file and
+  forwards each selected service image to Apple's image pull. Build-only
+  services are skipped with a clear warning instead of being built implicitly.
+- **One container per service.** Membership is reconstructed from Compose labels.
+  Duplicate service containers or a container number other than 1 fail clearly;
+  the shim never guesses which scaled replica to use.
 - **Service discovery.** Apple does not resolve service names by DNS without an
   admin `container system dns` domain. The shim closes the gap in two layers,
   both writing `<ip>  <service>` lines only to **each container's own
@@ -229,9 +243,14 @@ read the compose file.
   interpolation). Anchors, multi-document streams, and `|`/`>` block scalars are
   out of scope.
 
-Compose keys with no Apple equivalent (`restart`, `healthcheck`, `privileged`,
-`hostname`, `secrets`, `configs`, `deploy` replicas, and the like) are parsed but ignored,
-with a one-line warning per key so behavior is never silently misrepresented.
+Compose keys with no Apple equivalent (the service-level `restart` policy,
+`healthcheck`, `privileged`,
+`hostname`, `secrets`, `configs`, `deploy` replicas, `extra_hosts`, network
+aliases, and `depends_on` conditions beyond `service_started`) are parsed but
+ignored, with a one-line warning per service so behavior is never silently
+misrepresented.
+`compose run`, scaling, health-gated dependencies, network aliases, and
+anonymous-volume removal remain intentionally out of scope.
 
 ### Refused, by design
 

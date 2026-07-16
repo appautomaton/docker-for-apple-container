@@ -46,6 +46,7 @@ def load():
     except FileNotFoundError:
         d = {"containers": {}, "networks": {}, "volumes": {}, "ip": 1, "exec_log": []}
     d.setdefault("net_index", {})
+    d.setdefault("action_log", [])
     return d
 
 
@@ -131,6 +132,10 @@ if a[:2] == ["image", "inspect"]:
          "config": {"config": {"Entrypoint": ["/entry"], "Cmd": ["serve"]}}}]}]))
     raise SystemExit(0)
 
+if a[:2] == ["image", "pull"]:
+    d = load(); d["action_log"].append(["pull", a[-1]])
+    save(d); print("PULLED " + a[-1]); raise SystemExit(0)
+
 if a[:1] == ["list"]:
     d = load(); allc = "--all" in a
     rows = [c for c in d["containers"].values()
@@ -147,10 +152,19 @@ if a[:1] == ["stop"]:
     d = load(); ident = a[-1]
     if ident in d["containers"]:
         d["containers"][ident]["status"]["state"] = "stopped"
+    d["action_log"].append(["stop", ident])
+    save(d); print(ident); raise SystemExit(0)
+
+if a[:1] == ["start"]:
+    d = load(); ident = a[-1]
+    if ident in d["containers"]:
+        d["containers"][ident]["status"]["state"] = "running"
+    d["action_log"].append(["start", ident])
     save(d); print(ident); raise SystemExit(0)
 
 if a[:1] == ["rm"]:
     d = load(); ident = a[-1]; d["containers"].pop(ident, None)
+    d["action_log"].append(["rm", ident])
     save(d); print(ident); raise SystemExit(0)
 
 if a[:1] == ["exec"]:
@@ -158,11 +172,12 @@ if a[:1] == ["exec"]:
     # skip exec opts, find container id then command
     i = 1
     while i < len(a) and a[i].startswith("-"):
-        i += 2 if a[i] in ("-e","-w") else 1
+        i += 2 if a[i] in ("-e","-w","--user","--env-file") else 1
     ident = a[i]; cmd = a[i+1:]
     if ident in os.environ.get("FAKE_NO_SHELL", "").split(","):
         print("no such executable: sh", file=sys.stderr); raise SystemExit(1)
     d["exec_log"].append({"container": ident, "cmd": cmd})
+    d["action_log"].append(["exec", ident, *cmd])
     save(d); raise SystemExit(0)
 
 if a[:1] in (["cp"], ["copy"]):
@@ -407,6 +422,11 @@ class ComposeE2ETests(unittest.TestCase):
 
     def load_state(self) -> dict:
         return json.loads(self.state.read_text())
+
+    def clear_action_log(self) -> None:
+        state = self.load_state()
+        state["action_log"] = []
+        self.state.write_text(json.dumps(state))
 
     def test_up_creates_labeled_containers_and_network(self) -> None:
         self.write_compose(
@@ -784,6 +804,192 @@ class ComposeE2ETests(unittest.TestCase):
         ls = self.docker("compose", "ls")
         self.assertEqual(ls.returncode, 0, ls.stderr)
         self.assertIn("demo", ls.stdout)
+
+    def test_pull_uses_compose_images_and_requires_the_file(self) -> None:
+        self.write_compose(
+            """
+            services:
+              web:
+                image: nginx:latest
+                depends_on: [db]
+              db:
+                image: postgres:16
+              local:
+                build: .
+            """
+        )
+        result = self.docker("compose", "pull")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.load_state()["action_log"],
+            [["pull", "postgres:16"], ["pull", "nginx:latest"]],
+        )
+        self.assertIn("has no image to pull", result.stderr)
+
+        (self.project / "docker-compose.yml").unlink()
+        missing = self.docker("compose", "pull")
+        self.assertEqual(missing.returncode, 1)
+        self.assertIn("no compose file found", missing.stderr)
+
+    def test_lifecycle_uses_dependency_order(self) -> None:
+        self.write_compose(
+            """
+            services:
+              web:
+                image: nginx:latest
+                depends_on: [db]
+              db:
+                image: postgres:16
+            """
+        )
+        self.assertEqual(self.docker("compose", "up", "-d").returncode, 0)
+        self.clear_action_log()
+
+        stopped = self.docker("compose", "stop", "--timeout=7")
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertEqual(
+            self.load_state()["action_log"],
+            [["stop", "demo-web-1"], ["stop", "demo-db-1"]],
+        )
+
+        self.clear_action_log()
+        started = self.docker("compose", "start")
+        self.assertEqual(started.returncode, 0, started.stderr)
+        self.assertEqual(
+            self.load_state()["action_log"],
+            [["start", "demo-db-1"], ["start", "demo-web-1"]],
+        )
+
+        self.clear_action_log()
+        restarted = self.docker("compose", "restart")
+        self.assertEqual(restarted.returncode, 0, restarted.stderr)
+        self.assertEqual(
+            self.load_state()["action_log"],
+            [
+                ["stop", "demo-web-1"],
+                ["stop", "demo-db-1"],
+                ["start", "demo-db-1"],
+                ["start", "demo-web-1"],
+            ],
+        )
+
+    def test_lifecycle_falls_back_to_stable_label_order_without_file(self) -> None:
+        self.write_compose(
+            """
+            services:
+              zeta:
+                image: zeta:latest
+              alpha:
+                image: alpha:latest
+            """
+        )
+        self.assertEqual(self.docker("compose", "up", "-d").returncode, 0)
+        (self.project / "docker-compose.yml").unlink()
+        self.clear_action_log()
+
+        self.assertEqual(self.docker("compose", "stop").returncode, 0)
+        self.assertEqual(
+            self.load_state()["action_log"],
+            [["stop", "demo-zeta-1"], ["stop", "demo-alpha-1"]],
+        )
+
+        self.clear_action_log()
+        self.assertEqual(self.docker("compose", "start").returncode, 0)
+        self.assertEqual(
+            self.load_state()["action_log"],
+            [["start", "demo-alpha-1"], ["start", "demo-zeta-1"]],
+        )
+
+    def test_exec_and_rm_reconstruct_membership_from_labels(self) -> None:
+        self.write_compose(
+            """
+            services:
+              web:
+                image: nginx:latest
+                depends_on: [db]
+              db:
+                image: postgres:16
+            """
+        )
+        self.assertEqual(self.docker("compose", "up", "-d").returncode, 0)
+        (self.project / "docker-compose.yml").unlink()
+        self.clear_action_log()
+
+        executed = self.docker(
+            "compose", "exec", "-T", "--user", "1000", "web", "echo", "ok"
+        )
+        self.assertEqual(executed.returncode, 0, executed.stderr)
+        self.assertEqual(
+            self.load_state()["action_log"],
+            [["exec", "demo-web-1", "echo", "ok"]],
+        )
+
+        self.clear_action_log()
+        removed = self.docker("compose", "rm", "-fs")
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assertEqual(
+            self.load_state()["action_log"],
+            [
+                ["stop", "demo-web-1"],
+                ["stop", "demo-db-1"],
+                ["rm", "demo-web-1"],
+                ["rm", "demo-db-1"],
+            ],
+        )
+        self.assertEqual(self.load_state()["containers"], {})
+
+    def test_scaled_service_state_is_rejected(self) -> None:
+        self.write_compose(
+            """
+            services:
+              web:
+                image: nginx:latest
+            """
+        )
+        self.assertEqual(self.docker("compose", "up", "-d").returncode, 0)
+        state = self.load_state()
+        duplicate = json.loads(json.dumps(state["containers"]["demo-web-1"]))
+        duplicate["id"] = "demo-web-2"
+        duplicate["name"] = "demo-web-2"
+        duplicate["labels"]["com.docker.compose.container-number"] = "2"
+        duplicate["configuration"]["id"] = "demo-web-2"
+        duplicate["configuration"]["labels"][
+            "com.docker.compose.container-number"
+        ] = "2"
+        state["containers"]["demo-web-2"] = duplicate
+        self.state.write_text(json.dumps(state))
+
+        result = self.docker("compose", "stop")
+        self.assertEqual(result.returncode, 64)
+        self.assertIn("scaling is not supported", result.stderr)
+
+    def test_deferred_compose_features_warn_and_keep_one_service_container(self) -> None:
+        self.write_compose(
+            """
+            services:
+              web:
+                image: nginx:latest
+                depends_on:
+                  db:
+                    condition: service_healthy
+                deploy:
+                  replicas: 3
+                networks:
+                  default:
+                    aliases: [frontend]
+              db:
+                image: postgres:16
+            """
+        )
+        result = self.docker("compose", "up", "-d")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("deploy.replicas", result.stderr)
+        self.assertIn("network aliases ignored", result.stderr)
+        self.assertIn("depends_on conditions ignored", result.stderr)
+        self.assertEqual(
+            set(self.load_state()["containers"]),
+            {"demo-web-1", "demo-db-1"},
+        )
 
     def test_down_without_compose_file(self) -> None:
         # down must work from labels alone, even with no compose file present.

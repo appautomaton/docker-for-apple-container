@@ -9,6 +9,16 @@ Compose forwards `dns`, `dns_search`, and `dns_opt` to Apple. Service-name
 injection is network-scoped: on multi-network stacks, each container receives
 the peer address from the first network they share.
 
+Compose supports up, down, ps, logs, build, pull, exec, start, stop, restart,
+rm, config, and ls. Runtime membership comes only from Compose labels stored by
+Apple. Start order is dependency-forward when a file is available; stop and
+remove are reverse; label-only operation falls back to stable service-name
+order. Pull requires the file, while exec and lifecycle verbs can work from
+labels alone. The shim supports exactly one container per service and rejects
+scaled runtime state instead of selecting a replica arbitrarily.
+Compose run, scaling, health-gated dependencies, network aliases, extra_hosts,
+and anonymous-volume removal remain deferred and are never approximated.
+
 ## Runtime compatibility
 
 - Requires macOS 26 with Apple `container` 1.1.0 or newer.

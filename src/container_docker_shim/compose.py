@@ -12,10 +12,12 @@ network, and named volumes), annotated with Docker-compatible labels:
     com.docker.compose.container-number  always 1 (no replicas)
     com.docker.compose.oneoff            always "False"
 
-Every verb reconstructs the project by querying Apple and filtering on
-these labels — exactly the schema Docker Compose itself uses. `up` reads
-the compose file (it needs the service definitions and dependency order);
-`down`, `ps`, `logs`, and `ls` need only the labels.
+Every runtime verb reconstructs the project by querying Apple and filtering on
+these labels — exactly the schema Docker Compose itself uses. `up`, `pull`,
+`build`, and `config` require the compose file. `start`, `stop`, `restart`, and
+`rm` use it for dependency order when available, with stable service-name order
+from labels as a fallback. `down`, `ps`, `logs`, `exec`, and `ls` need only the
+runtime labels.
 
 Service discovery
 -----------------
@@ -68,6 +70,11 @@ from .cli import (
     _run_container_capture,
     _run_container_passthrough,
     _translate_volume,
+    cmd_exec as docker_exec,
+    cmd_image as docker_image,
+    cmd_rm as docker_rm,
+    cmd_start as docker_start,
+    cmd_stop as docker_stop,
 )
 
 
@@ -826,9 +833,47 @@ def _resource_limits(spec: dict[str, Any]) -> tuple[str, str]:
 
 def _warn_unsupported(service: Service, warned: set[str]) -> None:
     for key, reason in UNSUPPORTED_SERVICE_KEYS.items():
-        if key in service.spec and key not in warned:
+        marker = f"{service.name}:{key}"
+        if key in service.spec and marker not in warned:
             _warn(f"service {service.name!r}: '{key}' ignored — {reason}")
-            warned.add(key)
+            warned.add(marker)
+    deploy = service.spec.get("deploy")
+    replicas_marker = f"{service.name}:deploy.replicas"
+    if (
+        isinstance(deploy, dict)
+        and deploy.get("replicas") not in (None, 1)
+        and replicas_marker not in warned
+    ):
+        _warn(
+            f"service {service.name!r}: 'deploy.replicas' ignored — "
+            "the shim supports one container per service"
+        )
+        warned.add(replicas_marker)
+    networks = service.spec.get("networks")
+    aliases_marker = f"{service.name}:network.aliases"
+    if isinstance(networks, dict) and aliases_marker not in warned:
+        if any(
+            isinstance(config, dict) and config.get("aliases")
+            for config in networks.values()
+        ):
+            _warn(
+                f"service {service.name!r}: network aliases ignored — "
+                "service-name discovery remains available"
+            )
+            warned.add(aliases_marker)
+    depends_on = service.spec.get("depends_on")
+    condition_marker = f"{service.name}:depends_on.condition"
+    if isinstance(depends_on, dict) and condition_marker not in warned:
+        if any(
+            isinstance(config, dict)
+            and config.get("condition") not in (None, "service_started")
+            for config in depends_on.values()
+        ):
+            _warn(
+                f"service {service.name!r}: depends_on conditions ignored — "
+                "dependency order is preserved without health gating"
+            )
+            warned.add(condition_marker)
 
 
 # ========================================================================== #
@@ -843,6 +888,67 @@ def _project_containers(project: str) -> list[dict[str, Any]]:
     members = [row for row in rows if (row.get("labels") or {}).get(LABEL_PROJECT) == project]
     members.sort(key=lambda r: (r.get("labels") or {}).get(LABEL_SERVICE, ""))
     return members
+
+
+def _ordered_project_containers(
+    project_name: str,
+    *,
+    definition: Project | None,
+    only: list[str],
+    reverse: bool = False,
+) -> list[dict[str, Any]]:
+    """Return one labeled container per service in a deterministic order.
+
+    A compose file supplies dependency order when one is available. Label-only
+    operation remains deterministic without it by sorting service names. Scale
+    is deliberately out of scope, so duplicate service rows or a container
+    number other than 1 fail instead of being selected arbitrarily.
+    """
+    by_service: dict[str, dict[str, Any]] = {}
+    for row in _project_containers(project_name):
+        labels = row.get("labels") or {}
+        service = labels.get(LABEL_SERVICE)
+        number = labels.get(LABEL_NUMBER)
+        if not service:
+            raise ShimError(
+                f"compose: project container {row.get('name') or row.get('id')} "
+                f"is missing {LABEL_SERVICE}",
+                64,
+            )
+        if number not in (None, "1") or service in by_service:
+            raise ShimError(
+                f"compose: service {service!r} has multiple containers; "
+                "scaling is not supported",
+                64,
+            )
+        by_service[service] = row
+
+    selected = set(only) if only else set(by_service)
+    missing = [service for service in only if service not in by_service]
+    if missing:
+        raise ShimError(
+            f"compose: no container found for service(s): {', '.join(missing)}",
+            1,
+        )
+
+    names: list[str] = []
+    if definition is not None:
+        names.extend(
+            service.name
+            for service in definition.topo_sorted()
+            if service.name in selected
+        )
+    names.extend(sorted(selected - set(names)))
+    if reverse:
+        names.reverse()
+    return [by_service[name] for name in names]
+
+
+def _container_ident(row: dict[str, Any]) -> str:
+    ident = row.get("id") or row.get("name")
+    if not ident:
+        raise ShimError("compose: project container has no usable identity", 64)
+    return str(ident)
 
 
 def _all_projects() -> dict[str, list[dict[str, Any]]]:
@@ -1466,6 +1572,227 @@ def cmd_build(project: Project, *, only: list[str]) -> int:
     return 0
 
 
+def _selected_services(project: Project, only: list[str]) -> list[Service]:
+    services = project.topo_sorted()
+    if not only:
+        return services
+    missing = [name for name in only if name not in project.services]
+    if missing:
+        raise ShimError(
+            f"compose: no such service(s): {', '.join(missing)}",
+            1,
+        )
+    wanted = set(only)
+    return [service for service in services if service.name in wanted]
+
+
+def cmd_pull(project: Project, *, only: list[str]) -> int:
+    rc = 0
+    for service in _selected_services(project, only):
+        image = _as_str(service.spec.get("image"))
+        if not image:
+            _warn(f"service {service.name!r} has no image to pull")
+            continue
+        result = docker_image(["pull", image])
+        if result != 0:
+            rc = result
+    return rc
+
+
+def cmd_start(
+    project_name: str, *, definition: Project | None, only: list[str]
+) -> int:
+    rows = _ordered_project_containers(
+        project_name,
+        definition=definition,
+        only=only,
+    )
+    ids = [_container_ident(row) for row in rows if row.get("state") != "running"]
+    return docker_start(ids) if ids else 0
+
+
+def cmd_stop(
+    project_name: str,
+    *,
+    definition: Project | None,
+    only: list[str],
+    timeout: str | None,
+) -> int:
+    rows = _ordered_project_containers(
+        project_name,
+        definition=definition,
+        only=only,
+        reverse=True,
+    )
+    ids = [_container_ident(row) for row in rows if row.get("state") == "running"]
+    if not ids:
+        return 0
+    args: list[str] = []
+    if timeout is not None:
+        args.extend(["--timeout", timeout])
+    args.extend(ids)
+    return docker_stop(args)
+
+
+def cmd_restart(
+    project_name: str,
+    *,
+    definition: Project | None,
+    only: list[str],
+    timeout: str | None,
+) -> int:
+    forward = _ordered_project_containers(
+        project_name,
+        definition=definition,
+        only=only,
+    )
+    reverse = list(reversed(forward))
+    running = [
+        _container_ident(row) for row in reverse if row.get("state") == "running"
+    ]
+    if running:
+        stop_args: list[str] = []
+        if timeout is not None:
+            stop_args.extend(["--timeout", timeout])
+        stop_args.extend(running)
+        rc = docker_stop(stop_args)
+        if rc != 0:
+            return rc
+    ids = [_container_ident(row) for row in forward]
+    return docker_start(ids) if ids else 0
+
+
+def cmd_rm(
+    project_name: str,
+    *,
+    definition: Project | None,
+    only: list[str],
+    stop: bool,
+) -> int:
+    rows = _ordered_project_containers(
+        project_name,
+        definition=definition,
+        only=only,
+        reverse=True,
+    )
+    running = [row for row in rows if row.get("state") == "running"]
+    if running and stop:
+        rc = docker_stop([_container_ident(row) for row in running])
+        if rc != 0:
+            return rc
+    elif running:
+        names = ", ".join(
+            str(row.get("labels", {}).get(LABEL_SERVICE) or _container_ident(row))
+            for row in running
+        )
+        _warn(f"running service container(s) not removed: {names}; use --stop")
+    removable = rows if stop else [row for row in rows if row.get("state") != "running"]
+    ids = [_container_ident(row) for row in removable]
+    return docker_rm(ids) if ids else 0
+
+
+def cmd_exec(
+    project_name: str,
+    *,
+    argv: list[str],
+) -> int:
+    detach = False
+    no_tty = False
+    interactive = True
+    forwarded: list[str] = []
+    service: str | None = None
+    command: list[str] = []
+
+    i = 0
+    while i < len(argv):
+        raw = argv[i]
+        if raw == "--":
+            i += 1
+            if i < len(argv):
+                service = argv[i]
+                command = argv[i + 1 :]
+            break
+        if not raw.startswith("-"):
+            service = raw
+            command = argv[i + 1 :]
+            break
+        if raw in ("-d", "--detach"):
+            detach = True
+            i += 1
+            continue
+        if raw in ("-T", "--no-TTY"):
+            no_tty = True
+            i += 1
+            continue
+        if raw in ("-i", "--interactive"):
+            interactive = True
+            i += 1
+            continue
+        if raw == "--interactive=false":
+            interactive = False
+            i += 1
+            continue
+
+        key, inline, canonical = _compose_exec_value_option(raw)
+        if key is not None:
+            if inline is None:
+                if i + 1 >= len(argv):
+                    raise ShimError(f"compose: {raw} requires a value", 64)
+                inline = argv[i + 1]
+                i += 2
+            else:
+                i += 1
+            forwarded.extend([canonical, inline])
+            continue
+        raise ShimError(f"compose: unsupported exec option: {raw}", 64)
+
+    if service is None:
+        raise ShimError("compose: exec requires a service", 64)
+    if not command:
+        raise ShimError("compose: exec requires a command", 64)
+    [row] = _ordered_project_containers(
+        project_name,
+        definition=None,
+        only=[service],
+    )
+
+    args: list[str] = []
+    if detach:
+        args.append("--detach")
+    else:
+        if interactive:
+            args.append("-i")
+        if not no_tty:
+            args.append("-t")
+    args.extend(forwarded)
+    args.append(_container_ident(row))
+    args.extend(command)
+    return docker_exec(args)
+
+
+def _compose_exec_value_option(
+    raw: str,
+) -> tuple[str | None, str | None, str]:
+    long_names = {
+        "--env": "-e",
+        "--env-file": "--env-file",
+        "--user": "--user",
+        "--workdir": "-w",
+    }
+    short_names = {"-e": "-e", "-u": "--user", "-w": "-w"}
+    if raw.startswith("--"):
+        key, sep, value = raw.partition("=")
+        canonical = long_names.get(key)
+        if canonical is not None:
+            return key, value if sep else None, canonical
+        return None, None, ""
+    key = raw[:2]
+    canonical = short_names.get(key)
+    if canonical is None:
+        return None, None, ""
+    return key, raw[2:] or None, canonical
+
+
 # ========================================================================== #
 # Image resolution & build
 # ========================================================================== #
@@ -1604,7 +1931,8 @@ def _warn(message: str) -> None:
 
 
 _USAGE = (
-    "docker compose [-f FILE] [-p NAME] <up|down|ps|logs|build|config|ls> [options]"
+    "docker compose [-f FILE] [-p NAME] "
+    "<up|down|ps|logs|build|pull|exec|start|stop|restart|rm|config|ls> [options]"
 )
 
 
@@ -1676,8 +2004,18 @@ def _dispatch(
             file=file, project_name=project_name, project_dir=project_dir, env_file=env_file
         )
 
+    def optional_project() -> Project | None:
+        directory = os.path.abspath(project_dir or os.getcwd())
+        try:
+            _find_compose_file(file, directory)
+        except ShimError:
+            if file is not None:
+                raise
+            return None
+        return project()
+
     def resolved_name() -> str:
-        # down/ps/logs need only the project name; avoid requiring a compose file.
+        # Label-only verbs need only the project name; avoid requiring a file.
         if project_name:
             return _sanitize_project_name(project_name)
         env_name = os.environ.get("COMPOSE_PROJECT_NAME")
@@ -1723,6 +2061,52 @@ def _dispatch(
     if sub == "build":
         opts = _parse_flags(sub_args, bools=set())
         return cmd_build(project(), only=opts.positionals)
+    if sub == "pull":
+        opts = _parse_flags(sub_args, bools=set())
+        return cmd_pull(project(), only=opts.positionals)
+    if sub == "exec":
+        return cmd_exec(resolved_name(), argv=sub_args)
+    if sub in {"start", "stop", "restart", "rm"}:
+        definition = optional_project()
+        name = definition.name if definition is not None else resolved_name()
+        if sub == "start":
+            opts = _parse_flags(sub_args, bools=set())
+            return cmd_start(
+                name,
+                definition=definition,
+                only=opts.positionals,
+            )
+        if sub == "stop":
+            timeout, services = _parse_timeout_services(sub_args)
+            return cmd_stop(
+                name,
+                definition=definition,
+                only=services,
+                timeout=timeout,
+            )
+        if sub == "restart":
+            timeout, services = _parse_timeout_services(sub_args)
+            return cmd_restart(
+                name,
+                definition=definition,
+                only=services,
+                timeout=timeout,
+            )
+        opts = _parse_flags(
+            sub_args,
+            bools={"-f", "--force", "-s", "--stop", "-fs", "-sf"},
+        )
+        return cmd_rm(
+            name,
+            definition=definition,
+            only=opts.positionals,
+            stop=(
+                opts.flag("-s")
+                or opts.flag("--stop")
+                or opts.flag("-fs")
+                or opts.flag("-sf")
+            ),
+        )
     if sub == "config":
         return cmd_config(project())
     if sub == "ls":
@@ -1755,6 +2139,30 @@ def _parse_flags(argv: list[str], *, bools: set[str]) -> _Flags:
         else:
             positionals.append(arg)
     return _Flags(present, positionals)
+
+
+def _parse_timeout_services(argv: list[str]) -> tuple[str | None, list[str]]:
+    timeout: str | None = None
+    services: list[str] = []
+    i = 0
+    while i < len(argv):
+        raw = argv[i]
+        if raw in ("-t", "--timeout"):
+            timeout, i = _take(argv, i, raw)
+            continue
+        if raw.startswith("--timeout="):
+            timeout = raw.split("=", 1)[1]
+            i += 1
+            continue
+        if raw.startswith("-t") and raw != "-t":
+            timeout = raw[2:]
+            i += 1
+            continue
+        if raw.startswith("-"):
+            raise ShimError(f"compose: unsupported option: {raw}", 64)
+        services.append(raw)
+        i += 1
+    return timeout, services
 
 
 def _take(argv: list[str], index: int, opt: str) -> tuple[str, int]:
