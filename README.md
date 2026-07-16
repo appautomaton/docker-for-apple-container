@@ -78,7 +78,9 @@ of pretending to work.
 Docker's official CLI reference defines the behavior of the subset documented
 here, including [`docker container ls`](https://docs.docker.com/reference/cli/docker/container/ls/),
 [`docker inspect`](https://docs.docker.com/reference/cli/docker/inspect/), and
-[Docker output formatting](https://docs.docker.com/go/formatting/). Apple
+[`docker container exec`](https://docs.docker.com/reference/cli/docker/container/exec/),
+[`docker system df`](https://docs.docker.com/reference/cli/docker/system/df/),
+and [Docker output formatting](https://docs.docker.com/go/formatting/). Apple
 `container --help` and its runtime JSON define which of those behaviors can be
 translated faithfully. Unlisted Docker behavior is not implied; when no
 verified Apple equivalent exists, the shim refuses it explicitly.
@@ -101,9 +103,10 @@ verified Apple equivalent exists, the shim refuses it explicitly.
 - `docker container inspect ...` is an alias for `docker inspect`
 - `docker port CONTAINER [PRIVATE_PORT[/PROTO]]` and
   `docker container port ...`
-- `docker start CONTAINER`
-- `docker exec [-i] [-e KEY=VALUE] CONTAINER CMD...`
-- `docker stop -t N CONTAINER`
+- `docker start [-a|--attach] [-i|--interactive] CONTAINER`
+- `docker exec [-d] [-i] [-t] [-u USER] [-e KEY=VALUE]
+  [--env-file FILE] [-w DIR] CONTAINER CMD...`
+- `docker stop [-s SIGNAL] [-t N] CONTAINER...`
 - `docker rm [-f] CONTAINER`
 
 `docker inspect` supports a deliberate template subset: case-sensitive field
@@ -145,6 +148,11 @@ configuration, and root filesystem layers. Image-list templates support
 - `docker system info` maps to `docker info`. `docker system prune [--volumes]`
   runs Apple's `prune` + `image prune` + `network prune` (+ `volume prune`). It is
   **non-interactive**: there is no confirmation prompt, and `-f`/`-a` are no-ops.
+- `docker system df [--format json|table|yaml|toml]` maps directly to Apple's
+  Docker-shaped disk-usage report. Go templates and Docker's verbose mode are
+  refused because Apple has no faithful equivalent.
+- `docker container prune [-f]` maps to Apple's non-interactive stopped-container
+  prune. Docker prune filters are refused rather than silently ignored.
 
 ### Thin passthrough (basic forms only)
 

@@ -99,7 +99,7 @@
         "@type": "FAQPage",
         "mainEntity": [
           { "@type": "Question", "name": "Does docker-for-apple-container replace Docker Desktop?", "acceptedAnswer": { "@type": "Answer", "text": "No. It is a stateless translator, not a Docker replacement. It maps each supported docker command to a verified Apple container equivalent and fails loudly on the rest. Apple container is the single source of truth, so the shim persists nothing of its own." } },
-          { "@type": "Question", "name": "What Docker commands does it support?", "acceptedAnswer": { "@type": "Answer", "text": "Three tiers. Fully translated: version, info, build, run, create, exec, stop, rm, ps, inspect, port, images, image inspect, start. Translated extras: logs, stats, cp, restart, export, login, logout, system prune. Thin passthrough: pull, push, tag, save, load, rmi, remaining image operations, network, volume, kill. Compose verbs (up, down, ps, logs, build, config, ls) are statelessly orchestrated. Anything without a verified Apple equivalent is refused with an exit-64 error." } },
+          { "@type": "Question", "name": "What Docker commands does it support?", "acceptedAnswer": { "@type": "Answer", "text": "Three tiers. Fully translated: version, info, build, run, create, exec, stop, rm, ps, inspect, port, images, image inspect, start. Translated extras: logs, stats, cp, restart, export, login, logout, system df, system prune, container prune. Thin passthrough: pull, push, tag, save, load, rmi, remaining image operations, network, volume, kill. Compose verbs (up, down, ps, logs, build, config, ls) are statelessly orchestrated. Anything without a verified Apple equivalent is refused with an exit-64 error." } },
           { "@type": "Question", "name": "How does docker compose work without storing state?", "acceptedAnswer": { "@type": "Answer", "text": "Project membership is stored as labels in Apple's own object store, exactly as Docker Compose stores them on containers, networks, and volumes. The shim queries Apple and filters on those labels for down, ps, logs, and ls. DNS settings pass through to Apple, and service discovery selects addresses on networks shared by each pair of services. Only up, build, and config read the compose file." } },
           { "@type": "Question", "name": "Does it install any sidecar or daemon?", "acceptedAnswer": { "@type": "Answer", "text": "No. The shim is stateless and persists no Docker-shaped metadata, cache files, or support directory. There is no sidecar, no registry, and no database owned by the shim. The only trace is the docker command on your PATH." } },
           { "@type": "Question", "name": "What happens to unsupported Docker flags?", "acceptedAnswer": { "@type": "Answer", "text": "Flags without a verified Apple equivalent fail loudly with an exit-64 error instead of pretending to work. A few run flags (security-opt, pids-limit, storage-opt) are accepted as silent no-ops because Apple container documents no equivalent, and the shim surfaces this in its caveats." } },
@@ -235,7 +235,7 @@
             <ul class="cmd-list">
               <li><code>docker run -d …</code></li>
               <li><code>docker build -f -t</code></li>
-              <li><code>docker exec -i -e</code></li>
+              <li><code>docker exec -d -i -u -e</code></li>
             </ul>
             <details class="tier__more">
               <summary>10 more</summary>
@@ -246,8 +246,8 @@
                 <li><code>docker ps --filter --format</code></li>
                 <li><code>docker inspect -f/--format</code></li>
                 <li><code>docker port</code></li>
-                <li><code>docker start</code></li>
-                <li><code>docker stop -t N</code></li>
+                <li><code>docker start -a -i</code></li>
+                <li><code>docker stop -s SIG -t N</code></li>
                 <li><code>docker rm -f</code></li>
                 <li><code>docker image inspect</code></li>
               </ul>
@@ -261,10 +261,10 @@
             <ul class="cmd-list">
               <li><code>docker logs -f --tail N</code></li>
               <li><code>docker cp</code></li>
-              <li><code>docker system prune</code></li>
+              <li><code>docker system df / prune</code></li>
             </ul>
             <details class="tier__more">
-              <summary>6 more</summary>
+              <summary>7 more</summary>
               <ul class="cmd-list">
                 <li><code>docker stats --no-stream</code></li>
                 <li><code>docker restart -t N</code></li>
@@ -272,6 +272,7 @@
                 <li><code>docker login --password-stdin</code></li>
                 <li><code>docker logout</code></li>
                 <li><code>docker system info</code></li>
+                <li><code>docker container prune</code></li>
               </ul>
             </details>
           </article>
@@ -410,7 +411,7 @@
           </details>
           <details class="faq__item reveal">
             <summary>What Docker commands does it support?</summary>
-            <div class="faq__answer"><p>Three tiers. <strong>Fully translated:</strong> version, info, build, run, create, exec, stop, rm, ps, inspect, port, images, image inspect, start. Container and image inspection share a bounded <code>-f</code>/<code>--format</code> field and JSON subset rather than a full Go-template engine. Container lists and port lookups are derived live from Apple's runtime metadata. <strong>Translated extras:</strong> logs, stats, cp, restart, export, login, logout, system prune. <strong>Thin passthrough:</strong> pull, push, tag, save, load, rmi, remaining image operations, network, volume, kill. Compose verbs are statelessly orchestrated. Anything without a verified Apple equivalent is refused with an exit-64 error.</p></div>
+            <div class="faq__answer"><p>Three tiers. <strong>Fully translated:</strong> version, info, build, run, create, exec, stop, rm, ps, inspect, port, images, image inspect, start. Container and image inspection share a bounded <code>-f</code>/<code>--format</code> field and JSON subset rather than a full Go-template engine. Container lists and port lookups are derived live from Apple's runtime metadata. <strong>Translated extras:</strong> logs, stats, cp, restart, export, login, logout, system df, system prune, container prune. <strong>Thin passthrough:</strong> pull, push, tag, save, load, rmi, remaining image operations, network, volume, kill. Compose verbs are statelessly orchestrated. Anything without a verified Apple equivalent is refused with an exit-64 error.</p></div>
           </details>
           <details class="faq__item reveal">
             <summary>How does docker compose work without state?</summary>

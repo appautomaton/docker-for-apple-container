@@ -30,6 +30,14 @@ provides Docker-shaped columns, JSON lines, bounded templates, and stateless
 `ancestor`, `network`, and `volume` filters. `docker port` reads published-port
 bindings from the same runtime object.
 
+Lifecycle flags map directly where Apple 1.1 exposes the same behavior:
+`docker exec` supports detach, user, environment files, interactive/TTY, and
+working-directory flags; `docker start` supports attach and interactive; and
+`docker stop` supports timeout and signal selection. `docker system df` forwards
+Apple's Docker-shaped disk report, while `docker container prune -f` invokes
+Apple's already non-interactive stopped-container prune. Unsupported prune
+filters fail explicitly.
+
 `docker image inspect` uses the same formatter and returns Docker-shaped image
 metadata. `docker images` and `docker image ls` render Docker columns, quiet
 IDs, digest/no-truncation output, JSON lines, or the supported image fields.

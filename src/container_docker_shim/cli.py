@@ -1398,6 +1398,8 @@ def cmd_container(argv: list[str]) -> int:
         return cmd_inspect(argv[1:])
     if argv[0] == "port":
         return cmd_port(argv[1:])
+    if argv[0] == "prune":
+        return cmd_container_prune(argv[1:])
     return _unsupported("container " + " ".join(argv))
 
 
@@ -1717,10 +1719,36 @@ def cmd_build(argv: list[str]) -> int:
 
 
 def cmd_start(argv: list[str]) -> int:
-    if not argv:
+    attach = False
+    interactive = False
+    ids: list[str] = []
+    for arg in argv:
+        if arg in ("-a", "--attach"):
+            attach = True
+        elif arg in ("-i", "--interactive"):
+            interactive = True
+        elif arg in ("-ai", "-ia"):
+            attach = True
+            interactive = True
+        elif arg.startswith("-"):
+            return _die(f"unsupported start option: {arg}", 64)
+        else:
+            ids.append(arg)
+    if not ids:
         return _die("start requires at least one container", 64)
+    if (attach or interactive) and len(ids) != 1:
+        return _die("start attach/interactive supports exactly one container", 64)
+    if attach or interactive:
+        args = ["start"]
+        if attach:
+            args.append("--attach")
+        if interactive:
+            args.append("--interactive")
+        args.append(ids[0])
+        return _run_container_passthrough(args)
+
     rc = 0
-    for ident in argv:
+    for ident in ids:
         result = _run_container_capture(["start", ident])
         if result.returncode != 0:
             _print_completed(result)
@@ -1732,6 +1760,7 @@ def cmd_start(argv: list[str]) -> int:
 
 def cmd_stop(argv: list[str]) -> int:
     timeout = None
+    signal = None
     ids: list[str] = []
     i = 0
     while i < len(argv):
@@ -1739,7 +1768,16 @@ def cmd_stop(argv: list[str]) -> int:
         if arg in ("-t", "--time", "--timeout"):
             if value is None:
                 value, i = _take_value(argv, i, arg)
+            else:
+                i += 1
             timeout = value
+            continue
+        elif arg in ("-s", "--signal"):
+            if value is None:
+                value, i = _take_value(argv, i, arg)
+            else:
+                i += 1
+            signal = value
             continue
         elif argv[i].startswith("-"):
             return _die(f"unsupported stop option: {argv[i]}", 64)
@@ -1754,6 +1792,8 @@ def cmd_stop(argv: list[str]) -> int:
         args = ["stop"]
         if timeout is not None:
             args.extend(["--time", timeout])
+        if signal is not None:
+            args.extend(["--signal", signal])
         args.append(ident)
         result = _run_container_capture(args)
         if result.returncode != 0:
@@ -1806,7 +1846,9 @@ def cmd_exec(argv: list[str]) -> int:
             command = argv[i + 1:]
             break
         arg, value = _split_long(current)
-        if current in ("-i", "--interactive"):
+        if current in ("-d", "--detach"):
+            opts.append("--detach")
+        elif current in ("-i", "--interactive"):
             interactive = True
             opts.append("-i")
         elif current in ("-t", "--tty"):
@@ -1817,11 +1859,29 @@ def cmd_exec(argv: list[str]) -> int:
         elif arg in ("--env", "-e"):
             if value is None:
                 value, i = _take_value(argv, i, arg)
+            else:
+                i += 1
             opts.extend(["-e", value])
+            continue
+        elif arg == "--env-file":
+            if value is None:
+                value, i = _take_value(argv, i, arg)
+            else:
+                i += 1
+            opts.extend(["--env-file", value])
+            continue
+        elif arg in ("--user", "-u"):
+            if value is None:
+                value, i = _take_value(argv, i, arg)
+            else:
+                i += 1
+            opts.extend(["--user", value])
             continue
         elif arg in ("--workdir", "-w"):
             if value is None:
                 value, i = _take_value(argv, i, arg)
+            else:
+                i += 1
             opts.extend(["-w", value])
             continue
         else:
@@ -2059,7 +2119,46 @@ def cmd_system(argv: list[str]) -> int:
         return cmd_info(rest)
     if sub == "prune":
         return cmd_system_prune(rest)
+    if sub == "df":
+        return cmd_system_df(rest)
     return _die(f"unsupported docker system subcommand for Apple container: {sub}", 64)
+
+
+def cmd_system_df(argv: list[str]) -> int:
+    args = ["system", "df"]
+    i = 0
+    while i < len(argv):
+        arg, value = _split_long(argv[i])
+        if arg == "--format":
+            if value is None:
+                value, i = _take_value(argv, i, arg)
+            else:
+                i += 1
+            if _is_go_template(value):
+                return _die(
+                    "docker system df Go-template --format is unsupported by "
+                    "Apple container; --format accepts json|table|yaml|toml",
+                    64,
+                )
+            args.extend(["--format", value])
+            continue
+        if argv[i].startswith("-"):
+            return _die(f"unsupported docker system df option: {argv[i]}", 64)
+        return _die(f"system df takes no positional arguments: {argv[i]}", 64)
+    return _run_container_passthrough(args)
+
+
+def cmd_container_prune(argv: list[str]) -> int:
+    for arg in argv:
+        key, _ = _split_long(arg)
+        if key in ("-f", "--force"):
+            continue  # Apple prune is already non-interactive
+        if key == "--filter":
+            return _die("docker container prune filters are unsupported", 64)
+        if arg.startswith("-"):
+            return _die(f"unsupported docker container prune option: {arg}", 64)
+        return _die(f"container prune takes no positional arguments: {arg}", 64)
+    return _run_container_passthrough(["prune"])
 
 
 def cmd_system_prune(argv: list[str]) -> int:
@@ -2099,8 +2198,9 @@ def print_help() -> None:
     print()
     print("Translated:  version, info, build, run, create, ps, inspect,")
     print("             images, image inspect, port, start, exec, stop, restart, rm,")
-    print("             logs, cp, stats, export, login, logout, system prune")
-    print("Alias:       container inspect")
+    print("             logs, cp, stats, export, login, logout, system df/prune,")
+    print("             container prune")
+    print("Aliases:     container inspect, container port")
     print("Inspect fmt: field paths, literal text, and json; not full Go templates")
     print("Compose:     compose up/down/ps/logs/build/config/ls (stateless;")
     print("             project state lives in Apple container labels)")

@@ -162,6 +162,10 @@ if args[:2] == ["system", "status"]:
     print("apiserver is running")
     raise SystemExit(0)
 
+if args[:2] == ["system", "df"]:
+    print("SYSTEM-DF " + " ".join(args[2:]))
+    raise SystemExit(0)
+
 if args[:2] == ["image", "inspect"]:
     images = args[2:]
     print(json.dumps([image_record(image) for image in images]))
@@ -397,12 +401,14 @@ if args and args[0] == "exec":
     interactive = False
     while i < len(args):
         arg = args[i]
-        if arg == "-i":
+        if arg in ("-d", "--detach"):
+            i += 1
+        elif arg == "-i":
             interactive = True
             i += 1
         elif arg == "-t":
             i += 1
-        elif arg in ("-e", "-w"):
+        elif arg in ("-e", "-w", "--user", "--env-file"):
             i += 2
         else:
             break
@@ -492,6 +498,13 @@ if args and args[0] == "registry":
     raise SystemExit(0)
 
 if args and args[0] == "prune":
+    data = load()
+    data["containers"] = {
+        ident: item
+        for ident, item in data.get("containers", {}).items()
+        if item.get("status", {}).get("state") == "running"
+    }
+    save(data)
     print("PRUNE")
     raise SystemExit(0)
 
@@ -849,6 +862,64 @@ class CLIContractTests(ShimCLITestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "r1")
 
+    def test_exec_forwards_detach_user_and_env_file(self) -> None:
+        self.docker("run", "-d", "--name", "e1", "alpine", "sleep", "infinity")
+        env_file = self.root / "exec.env"
+        env_file.write_text("APP_ENV=production\n")
+        self.clear_container_calls()
+
+        result = self.docker(
+            "exec",
+            "--detach",
+            "--user=1000:1000",
+            "--env-file",
+            str(env_file),
+            "e1",
+            "env",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.container_calls(),
+            [
+                [
+                    "exec",
+                    "--detach",
+                    "--user",
+                    "1000:1000",
+                    "--env-file",
+                    str(env_file),
+                    "e1",
+                    "env",
+                ]
+            ],
+        )
+
+    def test_start_forwards_attach_and_interactive(self) -> None:
+        self.docker("create", "--name", "attached", "alpine", "cat")
+        self.clear_container_calls()
+
+        result = self.docker("start", "-ai", "attached")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.container_calls(),
+            [["start", "--attach", "--interactive", "attached"]],
+        )
+
+        multiple = self.docker("start", "-a", "attached", "other")
+        self.assertEqual(multiple.returncode, 64)
+        self.assertIn("exactly one container", multiple.stderr)
+
+    def test_stop_forwards_signal(self) -> None:
+        self.docker("run", "-d", "--name", "s1", "alpine", "sleep", "infinity")
+        self.clear_container_calls()
+
+        result = self.docker("stop", "--signal=TERM", "s1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            self.container_calls(),
+            [["stop", "--signal", "TERM", "s1"]],
+        )
+
     def test_rmi_aliases_image_rm(self) -> None:
         result = self.docker("rmi", "alpine:latest")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -907,6 +978,31 @@ class CLIContractTests(ShimCLITestCase):
         result = self.docker("system", "prune", "--volumes")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("VOLUME prune", result.stdout)
+
+    def test_system_df_forwards_apple_formats(self) -> None:
+        result = self.docker("system", "df", "--format=json")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "SYSTEM-DF --format json")
+
+        template = self.docker("system", "df", "--format", "{{.Type}}")
+        self.assertEqual(template.returncode, 64)
+        self.assertIn("json|table|yaml|toml", template.stderr)
+
+    def test_container_prune_is_noninteractive_and_rejects_filters(self) -> None:
+        self.docker("run", "-d", "--name", "running", "alpine", "sleep", "infinity")
+        self.docker("create", "--name", "stopped", "alpine", "true")
+
+        result = self.docker("container", "prune", "--force")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        state = json.loads((self.root / "fake-state.json").read_text())
+        self.assertIn("running", state["containers"])
+        self.assertNotIn("stopped", state["containers"])
+
+        filtered = self.docker(
+            "container", "prune", "--filter", "until=24h"
+        )
+        self.assertEqual(filtered.returncode, 64)
+        self.assertIn("filters are unsupported", filtered.stderr)
 
     def test_system_events_is_refused(self) -> None:
         result = self.docker("system", "events")
