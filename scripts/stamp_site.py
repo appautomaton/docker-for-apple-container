@@ -16,7 +16,7 @@ rewrites these spots in place:
 datePublished (first publish) is intentionally left alone. The script is
 idempotent and dependency-free. Run it locally to refresh the committed files:
 
-    python3 scripts/stamp_site.py 0.1.3 2026-06-28
+    python3 scripts/stamp_site.py 0.1.3 2026-07-16
 """
 
 from __future__ import annotations
@@ -43,7 +43,7 @@ def stamp(html: str, version: str, date: str) -> tuple[str, int]:
     # JSON-LD software version and modified date (values only, keys untouched).
     html = sub(r'("softwareVersion":\s*")[^"]*(")', rf"\g<1>{version}\g<2>", html)
     html = sub(r'("dateModified":\s*")[^"]*(")', rf"\g<1>{date}\g<2>", html)
-    # Footer line: <span>v0.1.2 · updated 2026-06-28</span> (the only bare
+    # Footer line: <span>v<version> · updated <date></span> (the only bare
     # <span> that begins with a literal "v").
     html = sub(
         r"(<span>v)[^<]*(</span>)",

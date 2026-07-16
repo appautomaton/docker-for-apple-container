@@ -60,6 +60,7 @@ class ContainerPresentationTests(test_cli.ShimCLITestCase):
 
         self.assertEqual(obj["Path"], "python")
         self.assertEqual(obj["Args"], ["app.py"])
+        self.assertEqual(obj["Platform"], "linux")
         self.assertEqual(obj["Config"]["Env"], ["APP_ENV=production"])
         self.assertEqual(obj["Config"]["WorkingDir"], "/app")
         self.assertEqual(obj["Config"]["User"], "1000:1000")

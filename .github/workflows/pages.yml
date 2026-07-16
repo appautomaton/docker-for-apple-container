@@ -1,9 +1,10 @@
 name: Deploy site to Pages
 
 # Builds and deploys docs/ to GitHub Pages. The version and "updated" date are
-# stamped into the page at deploy time from the latest git tag, so nothing is
-# hardwired. Runs on content changes to main and again on each release (a new
-# tag) so the published version stays current.
+# stamped into the page at deploy time from the latest git tag. If tags are not
+# available, the committed site metadata is the fallback. Runs on content
+# changes to main and again on each release so the published version stays
+# current.
 #
 # One-time setup: Settings > Pages > Source must be set to "GitHub Actions".
 on:
@@ -44,8 +45,12 @@ jobs:
           version="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
           version="${version#v}"
           if [ -z "$version" ]; then
-            echo "::warning::no v* tag found; falling back to 0.1.2"
-            version="0.1.2"
+            version="$(sed -n 's/.*\"softwareVersion\": \"\([^\"]*\)\".*/\1/p' docs/index.html | head -n 1)"
+            if [ -z "$version" ]; then
+              echo "::error::could not resolve a version from tags or docs/index.html"
+              exit 1
+            fi
+            echo "::warning::no v* tag found; using committed site version $version"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "date=$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"

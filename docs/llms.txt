@@ -48,6 +48,8 @@ Apple's Docker-shaped disk report, while `docker container prune -f` invokes
 Apple's already non-interactive stopped-container prune. Unsupported prune
 filters fail explicitly.
 
+`docker system info` aliases the translated `docker info` presentation.
+
 `docker image inspect` uses the same formatter and returns Docker-shaped image
 metadata. `docker images` and `docker image ls` render Docker columns, quiet
 IDs, digest/no-truncation output, JSON lines, or the supported image fields.

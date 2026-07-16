@@ -104,9 +104,10 @@ verified Apple equivalent exists, the shim refuses it explicitly.
 - `docker container inspect ...` is an alias for `docker inspect`
 - `docker port CONTAINER [PRIVATE_PORT[/PROTO]]` and
   `docker container port ...`
-- `docker start [-a|--attach] [-i|--interactive] CONTAINER`
-- `docker exec [-d] [-i] [-t] [-u USER] [-e KEY=VALUE]
-  [--env-file FILE] [-w DIR] CONTAINER CMD...`
+- `docker start CONTAINER...`; attach and interactive modes (`-a`/`-i`)
+  require exactly one container
+- `docker exec [OPTIONS] CONTAINER CMD...`, including detach, interactive/TTY,
+  user, environment, environment-file, and working-directory options
 - `docker stop [-s SIGNAL] [-t N] CONTAINER...`
 - `docker rm [-f] CONTAINER`
 
@@ -158,8 +159,8 @@ configuration, and root filesystem layers. Image-list templates support
 ### Thin passthrough (basic forms only)
 
 `docker pull`, `docker push`, `docker tag`, `docker save`, `docker load`,
-`docker rmi` (top-level aliases for `docker image <sub>`),
-`docker image <sub>` (`pull`/`rm`/`tag`/`push`/`save`/`load`/`prune`/`ls`),
+`docker rmi` (the top-level alias for `docker image rm`),
+`docker image <sub>` (`pull`/`rm`/`tag`/`push`/`save`/`load`/`prune`),
 `docker network <sub>` and `docker volume <sub>`
 (`create`/`ls`/`rm`/`inspect`/`prune`), and `docker kill [-s SIG]` forward to the
 matching Apple `container` command.
@@ -227,9 +228,10 @@ when available, then fall back to stable service-name order from labels.
   On shell-less images (e.g. distroless, cloudflare/cloudflared) where `exec sh`
   is impossible, it falls back to `container cp`: /etc/hosts is copied out,
   merged, and copied back via the guest agent — only a container that exits
-  before injection lands is skipped, with a warning. It is **compose-only**. Bare `docker run` is left alone, since injecting into a
-  possibly short-lived container would race its exit (Apple has no `--add-host`
-  flag to set it at creation, so it must be done via a post-start `exec`).
+  before injection lands is skipped, with a warning. It is **compose-only**.
+  Bare `docker run` is left alone, since injecting into a possibly short-lived
+  container would race its exit (Apple has no `--add-host` flag to set it at
+  creation, so it must be done via a post-start `exec`).
 - **Named volumes** map onto Apple-native volumes (`container volume create`),
   scoped as `<project>_<volume>`. Host-path mounts become bind mounts, with
   relative paths resolved against the compose file's directory.
@@ -244,11 +246,10 @@ when available, then fall back to stable service-name order from labels.
   out of scope.
 
 Compose keys with no Apple equivalent (the service-level `restart` policy,
-`healthcheck`, `privileged`,
-`hostname`, `secrets`, `configs`, `deploy` replicas, `extra_hosts`, network
-aliases, and `depends_on` conditions beyond `service_started`) are parsed but
-ignored, with a one-line warning per service so behavior is never silently
-misrepresented.
+`healthcheck`, `privileged`, `hostname`, `secrets`, `configs`, `deploy`
+replicas, `extra_hosts`, network aliases, and `depends_on` conditions beyond
+`service_started`) are parsed but ignored, with a one-line warning per service
+so behavior is never silently misrepresented.
 `compose run`, scaling, health-gated dependencies, network aliases, and
 anonymous-volume removal remain intentionally out of scope.
 

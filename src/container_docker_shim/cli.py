@@ -879,7 +879,7 @@ def _docker_inspect_object(row: dict[str, Any]) -> dict[str, Any]:
         "Created": row.get("created_at", DOCKER_ZERO_TIME),
         "Path": row.get("path", ""),
         "Args": row.get("args", []),
-        "Platform": row.get("platform", {}),
+        "Platform": _container_platform_os(row.get("platform")),
         "Config": {
             "Image": row.get("image", ""),
             "Labels": row.get("labels", {}),
@@ -919,6 +919,12 @@ def _docker_inspect_object(row: dict[str, Any]) -> dict[str, Any]:
         },
         "Mounts": row.get("mounts", []),
     }
+
+
+def _container_platform_os(value: Any) -> str:
+    if isinstance(value, dict):
+        return str(value.get("os") or "")
+    return str(value or "")
 
 
 _INSPECT_PATH_SEGMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -2198,15 +2204,15 @@ def print_help() -> None:
     print()
     print("Translated:  version, info, build, run, create, ps, inspect,")
     print("             images, image inspect, port, start, exec, stop, restart, rm,")
-    print("             logs, cp, stats, export, login, logout, system df/prune,")
+    print("             logs, cp, stats, export, login, logout, system info/df/prune,")
     print("             container prune")
-    print("Aliases:     container inspect, container port")
+    print("Container:   container inspect, container port, container prune")
     print("Inspect fmt: field paths, literal text, and json; not full Go templates")
     print("Compose:     compose up/down/ps/logs/build/pull/exec/start/stop/")
     print("             restart/rm/config/ls (stateless;")
     print("             project state lives in Apple container labels)")
-    print("Passthrough: pull, push, tag, save, load, rmi, image <sub>,")
-    print("             network <sub>, volume <sub>, kill")
+    print("Passthrough: pull, push, tag, save, load, rmi, image pull/rm/tag/")
+    print("             push/save/load/prune, network <sub>, volume <sub>, kill")
     print("Unsupported Docker commands and flags fail with a clear, explicit error.")
 
 
