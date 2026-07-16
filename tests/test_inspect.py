@@ -87,6 +87,20 @@ class InspectTests(test_cli.ShimCLITestCase):
         self.assertEqual(obj["Id"], "json-probe")
         self.assertEqual(obj["State"]["Running"], True)
 
+    def test_format_json_prints_one_compact_object_per_container(self) -> None:
+        self.run_container("first")
+        self.run_container("second")
+
+        result = self.docker(
+            "inspect", "--format", "json", "second", "first"
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            [json.loads(line)["Name"] for line in result.stdout.splitlines()],
+            ["second", "first"],
+        )
+        self.assertNotIn("\n  ", result.stdout)
+
     def test_default_json_uses_the_same_docker_shaped_model(self) -> None:
         self.run_container("model", labels=("role=api",), network="private")
         result = self.docker("inspect", "model")
@@ -97,7 +111,8 @@ class InspectTests(test_cli.ShimCLITestCase):
         self.assertEqual(obj["Name"], "model")
         self.assertEqual(obj["Image"], "sha256:" + "a" * 64)
         self.assertEqual(obj["Created"], "2026-01-01T00:00:00Z")
-        self.assertEqual(obj["Config"], {"Image": "alpine", "Labels": {"role": "api"}})
+        self.assertEqual(obj["Config"]["Image"], "alpine")
+        self.assertEqual(obj["Config"]["Labels"], {"role": "api"})
         self.assertEqual(
             obj["State"],
             {

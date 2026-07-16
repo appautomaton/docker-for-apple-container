@@ -278,6 +278,128 @@ def _normalize_networks(item: dict[str, Any]) -> list[dict[str, str]]:
     return networks
 
 
+def _container_configuration(item: dict[str, Any]) -> dict[str, Any]:
+    configuration = item.get("configuration") or item.get("Config") or {}
+    return configuration if isinstance(configuration, dict) else {}
+
+
+def _normalize_process(item: dict[str, Any]) -> dict[str, Any]:
+    process = _deep_get(item, "configuration", "initProcess") or {}
+    if not isinstance(process, dict):
+        process = {}
+    user = process.get("user") or {}
+    rendered_user = ""
+    if isinstance(user, str):
+        rendered_user = user
+    elif isinstance(user, dict):
+        user_id = user.get("id") or {}
+        raw = user.get("raw") or {}
+        if isinstance(user_id, dict) and (
+            "uid" in user_id or "gid" in user_id
+        ):
+            rendered_user = f"{user_id.get('uid', 0)}:{user_id.get('gid', 0)}"
+        elif isinstance(raw, dict):
+            rendered_user = str(raw.get("userString") or "")
+    arguments = process.get("arguments") or []
+    environment = process.get("environment") or []
+    return {
+        "path": str(process.get("executable") or ""),
+        "args": [str(value) for value in arguments]
+        if isinstance(arguments, list)
+        else [],
+        "env": [str(value) for value in environment]
+        if isinstance(environment, list)
+        else [],
+        "working_dir": str(process.get("workingDirectory") or ""),
+        "tty": bool(process.get("terminal")),
+        "user": rendered_user,
+    }
+
+
+def _mount_type(raw: Any) -> tuple[str, str]:
+    if isinstance(raw, str):
+        return raw, ""
+    if not isinstance(raw, dict) or not raw:
+        return "bind", ""
+    name = next(iter(raw))
+    payload = raw.get(name) or {}
+    if name == "volume":
+        volume_name = payload.get("name") if isinstance(payload, dict) else ""
+        return "volume", str(volume_name or "")
+    if name == "tmpfs":
+        return "tmpfs", ""
+    return "bind", ""
+
+
+def _normalize_mounts(item: dict[str, Any]) -> list[dict[str, Any]]:
+    mounts = _deep_get(item, "configuration", "mounts") or item.get("mounts") or []
+    if not isinstance(mounts, list):
+        return []
+    normalized: list[dict[str, Any]] = []
+    for mount in mounts:
+        if not isinstance(mount, dict):
+            continue
+        options = mount.get("options") or []
+        if not isinstance(options, list):
+            options = []
+        mount_type, name = _mount_type(mount.get("type"))
+        normalized.append(
+            {
+                "Type": mount_type,
+                "Name": name,
+                "Source": str(mount.get("source") or ""),
+                "Destination": str(mount.get("destination") or ""),
+                "Driver": "local" if mount_type == "volume" else "",
+                "Mode": ",".join(str(option) for option in options),
+                "RW": "ro" not in options,
+                "Propagation": "",
+            }
+        )
+    return normalized
+
+
+def _normalize_published_ports(item: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+    ports = _deep_get(item, "configuration", "publishedPorts") or []
+    if not isinstance(ports, list):
+        return {}
+    normalized: dict[str, list[dict[str, str]]] = {}
+    for port in ports:
+        if not isinstance(port, dict):
+            continue
+        try:
+            host_port = int(port.get("hostPort"))
+            container_port = int(port.get("containerPort"))
+            count = int(port.get("count") or 1)
+        except (TypeError, ValueError):
+            continue
+        protocol = str(port.get("proto") or "tcp").lower()
+        host_ip = str(port.get("hostAddress") or "0.0.0.0")
+        for offset in range(max(0, count)):
+            key = f"{container_port + offset}/{protocol}"
+            normalized.setdefault(key, []).append(
+                {
+                    "HostIp": host_ip,
+                    "HostPort": str(host_port + offset),
+                }
+            )
+    return normalized
+
+
+def _normalize_resources(item: dict[str, Any]) -> dict[str, int]:
+    resources = _deep_get(item, "configuration", "resources") or {}
+    if not isinstance(resources, dict):
+        resources = {}
+    try:
+        cpus = int(resources.get("cpus") or 0)
+    except (TypeError, ValueError):
+        cpus = 0
+    try:
+        memory = int(resources.get("memoryInBytes") or 0)
+    except (TypeError, ValueError):
+        memory = 0
+    return {"cpus": cpus, "memory": memory}
+
+
 def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
     item_id = _first_present(item, ("id", "ID", "containerID", "container_id"))
     name = _first_present(item, ("name", "Name", "names", "Names"))
@@ -319,6 +441,15 @@ def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
         )
     else:
         finished_at = str(explicit_finished_at or DOCKER_ZERO_TIME)
+    configuration = _container_configuration(item)
+    process = _normalize_process(item)
+    resources = _normalize_resources(item)
+    mounts = _normalize_mounts(item)
+    networks = _normalize_networks(item)
+    ports = _normalize_published_ports(item)
+    dns = configuration.get("dns") or {}
+    if not isinstance(dns, dict):
+        dns = {}
 
     return {
         "id": str(item_id or name),
@@ -337,7 +468,26 @@ def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
         "created_at": created_at,
         "started_at": started_at,
         "finished_at": finished_at,
-        "networks": _normalize_networks(item),
+        "networks": networks,
+        "ports": ports,
+        "mounts": mounts,
+        "path": process["path"],
+        "args": process["args"],
+        "env": process["env"],
+        "working_dir": process["working_dir"],
+        "tty": process["tty"],
+        "user": process["user"],
+        "cpus": resources["cpus"],
+        "memory": resources["memory"],
+        "read_only": bool(configuration.get("readOnly")),
+        "shm_size": int(configuration.get("shmSize") or 0),
+        "init": bool(configuration.get("useInit")),
+        "cap_add": [str(value) for value in configuration.get("capAdd") or []],
+        "cap_drop": [str(value) for value in configuration.get("capDrop") or []],
+        "dns": [str(value) for value in dns.get("nameservers") or []],
+        "dns_search": [str(value) for value in dns.get("searchDomains") or []],
+        "dns_options": [str(value) for value in dns.get("options") or []],
+        "platform": configuration.get("platform") or {},
     }
 
 
@@ -441,24 +591,75 @@ def _matches_filter(row: dict[str, Any], filters: list[str]) -> bool:
             wanted = filt[len("id="):]
             if not row.get("id", "").startswith(wanted):
                 return False
+        elif filt.startswith("ancestor="):
+            wanted = filt[len("ancestor="):]
+            image = row.get("image", "")
+            image_id = row.get("image_id", "")
+            repository, _tag = _split_image_reference(image) if image else ("", "")
+            if wanted not in (image, repository) and not image_id.startswith(wanted):
+                return False
+        elif filt.startswith("network="):
+            wanted = filt[len("network="):]
+            if not any(
+                attachment.get("name") == wanted
+                or attachment.get("name", "").startswith(wanted)
+                for attachment in row.get("networks") or []
+            ):
+                return False
+        elif filt.startswith("volume="):
+            wanted = filt[len("volume="):]
+            if not any(
+                wanted
+                in (
+                    mount.get("Name", ""),
+                    mount.get("Source", ""),
+                    mount.get("Destination", ""),
+                )
+                for mount in row.get("mounts") or []
+            ):
+                return False
         else:
             return False
     return True
 
 
-def _format_row(template: str, row: dict[str, Any]) -> str:
-    rendered = template
-    replacements = {
-        "{{.ID}}": row.get("id", ""),
-        "{{.Names}}": row.get("name", ""),
-        "{{.Name}}": row.get("name", ""),
-        "{{.Image}}": row.get("image", ""),
-        "{{.State}}": row.get("state", ""),
-        "{{.Status}}": row.get("state", ""),
+def _format_port_bindings(ports: dict[str, list[dict[str, str]]]) -> str:
+    rendered: list[str] = []
+    for container_port, bindings in ports.items():
+        if not bindings:
+            rendered.append(container_port)
+            continue
+        for binding in bindings:
+            host_ip = binding.get("HostIp", "")
+            host_port = binding.get("HostPort", "")
+            prefix = f"{host_ip}:" if host_ip else ""
+            rendered.append(f"{prefix}{host_port}->{container_port}")
+    return ", ".join(rendered)
+
+
+def _docker_ps_object(row: dict[str, Any]) -> dict[str, Any]:
+    command = " ".join([row.get("path", ""), *(row.get("args") or [])]).strip()
+    labels = row.get("labels") or {}
+    mounts = row.get("mounts") or []
+    networks = row.get("networks") or []
+    started = row.get("started_at") or row.get("created_at")
+    return {
+        "ID": row.get("id", ""),
+        "Image": row.get("image", ""),
+        "Command": json.dumps(command) if command else "",
+        "CreatedAt": row.get("created_at", DOCKER_ZERO_TIME),
+        "RunningFor": _human_age(started),
+        "Ports": _format_port_bindings(row.get("ports") or {}),
+        "State": row.get("state", ""),
+        "Status": row.get("state", ""),
+        "Names": row.get("name", ""),
+        "Name": row.get("name", ""),
+        "Labels": ",".join(f"{key}={value}" for key, value in sorted(labels.items())),
+        "Mounts": ",".join(
+            mount.get("Name") or mount.get("Source") or "" for mount in mounts
+        ),
+        "Networks": ",".join(network.get("name", "") for network in networks),
     }
-    for needle, value in replacements.items():
-        rendered = rendered.replace(needle, str(value))
-    return rendered
 
 
 def _split_image_reference(reference: str) -> tuple[str, str]:
@@ -676,9 +877,30 @@ def _docker_inspect_object(row: dict[str, Any]) -> dict[str, Any]:
         "Name": row.get("name", ""),
         "Image": row.get("image_id") or row.get("image", ""),
         "Created": row.get("created_at", DOCKER_ZERO_TIME),
+        "Path": row.get("path", ""),
+        "Args": row.get("args", []),
+        "Platform": row.get("platform", {}),
         "Config": {
             "Image": row.get("image", ""),
             "Labels": row.get("labels", {}),
+            "Env": row.get("env", []),
+            "WorkingDir": row.get("working_dir", ""),
+            "User": row.get("user", ""),
+            "Tty": bool(row.get("tty")),
+            "Cmd": None,
+            "Entrypoint": None,
+        },
+        "HostConfig": {
+            "Memory": row.get("memory", 0),
+            "NanoCpus": row.get("cpus", 0) * 1_000_000_000,
+            "ReadonlyRootfs": bool(row.get("read_only")),
+            "ShmSize": row.get("shm_size", 0),
+            "CapAdd": row.get("cap_add", []),
+            "CapDrop": row.get("cap_drop", []),
+            "Init": bool(row.get("init")),
+            "Dns": row.get("dns", []),
+            "DnsSearch": row.get("dns_search", []),
+            "DnsOptions": row.get("dns_options", []),
         },
         "State": {
             "Status": state,
@@ -692,8 +914,10 @@ def _docker_inspect_object(row: dict[str, Any]) -> dict[str, Any]:
         },
         "NetworkSettings": {
             "IPAddress": attachments[0].get("ipv4", "") if attachments else "",
+            "Ports": row.get("ports", {}),
             "Networks": networks,
         },
+        "Mounts": row.get("mounts", []),
     }
 
 
@@ -1015,7 +1239,7 @@ def cmd_ps(argv: list[str]) -> int:
     all_containers = False
     quiet = False
     filters: list[str] = []
-    fmt = None
+    fmt: str | None = None
 
     i = 0
     while i < len(argv):
@@ -1024,6 +1248,8 @@ def cmd_ps(argv: list[str]) -> int:
             all_containers = True
         elif arg in ("-q", "--quiet"):
             quiet = True
+        elif arg == "--no-trunc":
+            pass
         elif arg in ("--filter", "-f"):
             if value is None:
                 value, i = _take_value(argv, i, arg)
@@ -1039,6 +1265,17 @@ def cmd_ps(argv: list[str]) -> int:
             return _die(f"unsupported ps option: {argv[i]}", 64)
         i += 1
 
+    allowed_filters = {"id", "name", "label", "status", "ancestor", "network", "volume"}
+    for filt in filters:
+        key = filt.split("=", 1)[0]
+        if "=" not in filt or key not in allowed_filters:
+            return _die(f"unsupported docker ps filter: {filt}", 64)
+    template = None
+    if fmt is not None and fmt != "json":
+        if fmt.startswith("table"):
+            return _die("docker ps table templates are not supported", 64)
+        template = _compile_template(fmt, subject="ps")
+
     code, rows, err = _load_container_rows(all_containers)
     if code != 0:
         sys.stderr.write(err)
@@ -1048,13 +1285,32 @@ def cmd_ps(argv: list[str]) -> int:
         for row in rows:
             print(row["id"])
         return 0
-    if fmt:
-        for row in rows:
-            print(_format_row(fmt, row))
+    objects = [_docker_ps_object(row) for row in rows]
+    if fmt == "json":
+        for obj in objects:
+            print(json.dumps(obj, ensure_ascii=False, separators=(",", ":")))
         return 0
-    print("CONTAINER ID\tIMAGE\tSTATE\tNAMES")
-    for row in rows:
-        print(f"{row['id']}\t{row['image']}\t{row['state']}\t{row['name']}")
+    if template is not None:
+        output = [_render_template(template, obj, subject="ps") for obj in objects]
+        for line in output:
+            print(line)
+        return 0
+    print("CONTAINER ID\tIMAGE\tCOMMAND\tCREATED\tSTATUS\tPORTS\tNAMES")
+    for obj in objects:
+        print(
+            "\t".join(
+                str(obj[key])
+                for key in (
+                    "ID",
+                    "Image",
+                    "Command",
+                    "RunningFor",
+                    "Status",
+                    "Ports",
+                    "Names",
+                )
+            )
+        )
     return 0
 
 
@@ -1097,7 +1353,9 @@ def cmd_inspect(argv: list[str]) -> int:
     if not ids:
         return _die("inspect requires at least one container", 64)
     template = (
-        _compile_template(fmt, subject="inspect") if fmt is not None else None
+        _compile_template(fmt, subject="inspect")
+        if fmt is not None and fmt != "json"
+        else None
     )
 
     objects: list[dict[str, Any]] = []
@@ -1116,6 +1374,11 @@ def cmd_inspect(argv: list[str]) -> int:
         row = _normalize_inspect_item(item, ident)
         objects.append(_docker_inspect_object(row))
 
+    if fmt == "json":
+        for obj in objects:
+            print(json.dumps(obj, ensure_ascii=False, separators=(",", ":")))
+        return 0
+
     if template is not None:
         output = [
             _render_template(template, obj, subject="inspect") for obj in objects
@@ -1133,7 +1396,42 @@ def cmd_container(argv: list[str]) -> int:
         return _die("container requires a subcommand", 64)
     if argv[0] == "inspect":
         return cmd_inspect(argv[1:])
+    if argv[0] == "port":
+        return cmd_port(argv[1:])
     return _unsupported("container " + " ".join(argv))
+
+
+def _host_binding(binding: dict[str, str]) -> str:
+    host_ip = binding.get("HostIp", "")
+    host_port = binding.get("HostPort", "")
+    if ":" in host_ip and not host_ip.startswith("["):
+        host_ip = f"[{host_ip}]"
+    return f"{host_ip}:{host_port}" if host_ip else host_port
+
+
+def cmd_port(argv: list[str]) -> int:
+    if not argv or len(argv) > 2 or argv[0].startswith("-"):
+        return _die("port requires CONTAINER [PRIVATE_PORT[/PROTO]]", 64)
+    ident = argv[0]
+    private_port = argv[1] if len(argv) == 2 else None
+    if private_port is not None and "/" not in private_port:
+        private_port += "/tcp"
+    item = _inspect_container_item(ident)
+    if item is None:
+        return _die(f"could not inspect container: {ident}", 1)
+    row = _normalize_inspect_item(item, ident)
+    ports = row.get("ports") or {}
+    if private_port is not None:
+        bindings = ports.get(private_port) or []
+        if not bindings:
+            return _die(f"container has no published port {private_port}", 1)
+        for binding in bindings:
+            print(_host_binding(binding))
+        return 0
+    for container_port, bindings in ports.items():
+        for binding in bindings:
+            print(f"{container_port} -> {_host_binding(binding)}")
+    return 0
 
 
 def _parse_run_options(
@@ -1800,7 +2098,7 @@ def print_help() -> None:
     print("docker-for-apple-container: Docker CLI subset over Apple container")
     print()
     print("Translated:  version, info, build, run, create, ps, inspect,")
-    print("             images, image inspect, start, exec, stop, restart, rm,")
+    print("             images, image inspect, port, start, exec, stop, restart, rm,")
     print("             logs, cp, stats, export, login, logout, system prune")
     print("Alias:       container inspect")
     print("Inspect fmt: field paths, literal text, and json; not full Go templates")
@@ -1845,6 +2143,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_inspect(rest)
         if command == "container":
             return cmd_container(rest)
+        if command == "port":
+            return cmd_port(rest)
         if command == "run":
             return cmd_run(rest)
         if command == "start":

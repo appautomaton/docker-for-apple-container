@@ -100,6 +100,50 @@ def image_record(reference):
     }
 
 
+def memory_bytes(value):
+    units = {"K": 1024, "M": 1024**2, "G": 1024**3}
+    suffix = value[-1:].upper()
+    return int(value[:-1]) * units[suffix] if suffix in units else int(value)
+
+
+def mount_record(value):
+    fields = {}
+    flags = set()
+    for part in value.split(","):
+        if "=" in part:
+            key, val = part.split("=", 1)
+            fields[key] = val
+        else:
+            flags.add(part)
+    mount_type = fields.get("type", "bind")
+    encoded_type = {"tmpfs": {}} if mount_type == "tmpfs" else {"virtiofs": {}}
+    options = ["ro"] if "readonly" in flags else []
+    return {
+        "type": encoded_type,
+        "source": fields.get("source", "tmpfs" if mount_type == "tmpfs" else ""),
+        "destination": fields.get("target", ""),
+        "options": options,
+    }
+
+
+def publish_record(value):
+    base, _, proto = value.partition("/")
+    protocol = proto or "tcp"
+    parts = base.split(":")
+    if len(parts) == 2:
+        host_ip = "0.0.0.0"
+        host_port, container_port = parts
+    else:
+        host_ip, host_port, container_port = parts[-3:]
+    return {
+        "hostAddress": host_ip,
+        "hostPort": int(host_port),
+        "containerPort": int(container_port),
+        "proto": protocol,
+        "count": 1,
+    }
+
+
 args = sys.argv[1:]
 if CALL_LOG:
     log = Path(CALL_LOG)
@@ -150,6 +194,22 @@ if args and args[0] == "run":
     image = None
     detach = False
     command = []
+    environment = []
+    working_dir = "/"
+    user = "0:0"
+    terminal = False
+    mounts = []
+    published_ports = []
+    cpus = 4
+    memory = 1024**3
+    read_only = False
+    use_init = False
+    cap_add = []
+    cap_drop = []
+    shm_size = 0
+    dns = {"nameservers": [], "searchDomains": [], "options": []}
+    platform = {"os": "linux", "architecture": "arm64", "variant": ""}
+    entrypoint = None
     i = 1
     value_opts = {
         "--name", "--label", "-w", "--workdir", "--cwd", "-e", "--env",
@@ -165,6 +225,12 @@ if args and args[0] == "run":
         if key in bool_opts:
             if key == "-d":
                 detach = True
+            elif key == "-t":
+                terminal = True
+            elif key == "--init":
+                use_init = True
+            elif key == "--read-only":
+                read_only = True
             i += 1
             continue
         if key in value_opts:
@@ -179,6 +245,50 @@ if args and args[0] == "run":
                 labels[k] = v
             if key == "--network":
                 networks.append(value)
+            if key in ("-e", "--env"):
+                environment.append(value)
+            if key in ("-w", "--workdir", "--cwd"):
+                working_dir = value
+            if key == "--user":
+                user = value
+            if key == "--mount":
+                mounts.append(mount_record(value))
+            if key == "--tmpfs":
+                mounts.append(
+                    {
+                        "type": {"tmpfs": {}},
+                        "source": "tmpfs",
+                        "destination": value,
+                        "options": [],
+                    }
+                )
+            if key == "--memory":
+                memory = memory_bytes(value)
+            if key == "--cpus":
+                cpus = int(value)
+            if key == "--cap-add":
+                cap_add.append(value)
+            if key == "--cap-drop":
+                cap_drop.append(value)
+            if key in ("--publish", "-p"):
+                published_ports.append(publish_record(value))
+            if key == "--dns":
+                dns["nameservers"].append(value)
+            if key == "--dns-search":
+                dns["searchDomains"].append(value)
+            if key == "--dns-option":
+                dns["options"].append(value)
+            if key == "--shm-size":
+                shm_size = memory_bytes(value)
+            if key == "--platform":
+                os_name, arch, *variant = value.split("/")
+                platform = {
+                    "os": os_name,
+                    "architecture": arch,
+                    "variant": variant[0] if variant else "",
+                }
+            if key == "--entrypoint":
+                entrypoint = value
             continue
         image = arg
         command = args[i + 1:]
@@ -191,6 +301,13 @@ if args and args[0] == "run":
     if not networks:
         networks = ["default"]
     host = len(data["containers"]) + 2
+    executable = entrypoint or (command[0] if command else "/bin/sh")
+    process_args = command if entrypoint else command[1:]
+    if user.replace(":", "").isdigit():
+        uid, _, gid = user.partition(":")
+        encoded_user = {"id": {"uid": int(uid), "gid": int(gid or uid)}}
+    else:
+        encoded_user = {"raw": {"userString": user}}
     data["containers"][name] = {
         "id": name,
         "configuration": {
@@ -200,6 +317,30 @@ if args and args[0] == "run":
                 "reference": image or "",
                 "descriptor": {"digest": "sha256:" + "a" * 64},
             },
+            "initProcess": {
+                "executable": executable,
+                "arguments": process_args,
+                "environment": environment,
+                "workingDirectory": working_dir,
+                "terminal": terminal,
+                "user": encoded_user,
+                "supplementalGroups": [],
+                "rlimits": [],
+            },
+            "mounts": mounts,
+            "publishedPorts": published_ports,
+            "resources": {
+                "cpus": cpus,
+                "memoryInBytes": memory,
+                "cpuOverhead": 1,
+            },
+            "dns": dns,
+            "platform": platform,
+            "readOnly": read_only,
+            "useInit": use_init,
+            "capAdd": cap_add,
+            "capDrop": cap_drop,
+            "shmSize": shm_size,
             "creationDate": "2026-01-01T00:00:00Z",
         },
         "status": {

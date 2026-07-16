@@ -23,6 +23,13 @@ The `-f`/`--format` implementation supports field paths, literal text, multiple
 expressions, and `json` rendering. It intentionally refuses unsupported fields
 and full Go-template control flow rather than approximating them.
 
+Container presentation is derived live from Apple's list and inspect JSON.
+Inspect includes process configuration, mounts, published ports, resource and
+DNS settings, selected security settings, and network attachments. `docker ps`
+provides Docker-shaped columns, JSON lines, bounded templates, and stateless
+`ancestor`, `network`, and `volume` filters. `docker port` reads published-port
+bindings from the same runtime object.
+
 `docker image inspect` uses the same formatter and returns Docker-shaped image
 metadata. `docker images` and `docker image ls` render Docker columns, quiet
 IDs, digest/no-truncation output, JSON lines, or the supported image fields.

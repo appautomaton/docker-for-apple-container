@@ -94,9 +94,13 @@ verified Apple equivalent exists, the shim refuses it explicitly.
 - `docker run -d ... IMAGE CMD...`
 - `docker create ... IMAGE CMD...` uses the same flag translation as `run` and
   prints the new container ID
-- `docker ps -a --filter ... --format ...`
+- `docker ps -a --filter ... --format ...` with Docker-shaped default columns,
+  JSON lines, and bounded templates. Stateless filters cover `id`, `name`,
+  `label`, `status`, `ancestor`, `network`, and `volume`.
 - `docker inspect [--type container] [-f|--format TEMPLATE] CONTAINER...`
 - `docker container inspect ...` is an alias for `docker inspect`
+- `docker port CONTAINER [PRIVATE_PORT[/PROTO]]` and
+  `docker container port ...`
 - `docker start CONTAINER`
 - `docker exec [-i] [-e KEY=VALUE] CONTAINER CMD...`
 - `docker stop -t N CONTAINER`
@@ -105,10 +109,13 @@ verified Apple equivalent exists, the shim refuses it explicitly.
 `docker inspect` supports a deliberate template subset: case-sensitive field
 paths, optional whitespace, multiple expressions mixed with literal text, and
 `json` rendering such as `{{json .Config.Labels}}` or `{{json .}}`. The
-Docker-shaped object currently includes identity, image, labels, lifecycle
-state and timestamps, plus primary and per-network addresses. Dictionaries and
-lists require `json`; unsupported fields and full Go-template features fail
-clearly instead of being guessed.
+Docker-shaped container object includes identity, image, labels, lifecycle
+state and timestamps, process arguments and environment, working directory and
+user, mounts, published ports, CPU and memory limits, DNS settings, selected
+security settings, and primary and per-network addresses. `--format json`
+prints one compact object per requested container. Dictionaries and lists
+require `json`; unsupported fields and full Go-template features fail clearly
+instead of being guessed.
 
 Image inspection uses the same bounded formatter and selects the requested
 platform, or the host platform when none is given. Its Docker-shaped object
