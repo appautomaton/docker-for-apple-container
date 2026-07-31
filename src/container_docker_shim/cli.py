@@ -505,7 +505,7 @@ def _normalize_inspect_item(item: dict[str, Any], ident: str) -> dict[str, Any]:
 def _list_item_is_complete(item: dict[str, Any], row: dict[str, Any]) -> bool:
     """Whether Apple list JSON has everything current list consumers need.
 
-    Apple container 1.1.0 returns the full configuration and status object from
+    Apple container 1.2.0 returns the full configuration and status object from
     ``container list --format json``. Keep a per-record inspect fallback for a
     missing identity, image, state, or labels block so newer schemas degrade
     safely without restoring an inspect call for every listed container.

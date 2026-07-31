@@ -19,6 +19,18 @@ class DocumentationConsistencyTests(unittest.TestCase):
     def setUp(self) -> None:
         self.html = (ROOT / "docs" / "index.html").read_text()
         self.readme = (ROOT / "README.md").read_text()
+        self.llms = (ROOT / "docs" / "llms.txt").read_text()
+
+    def test_runtime_compatibility_baseline_is_consistent(self) -> None:
+        documents = {
+            "README.md": self.readme,
+            "docs/index.html": self.html,
+            "docs/llms.txt": self.llms,
+        }
+        for name, document in documents.items():
+            with self.subTest(document=name):
+                self.assertIn("1.2.0", document)
+                self.assertNotIn("1.1.0", document)
 
     def test_site_metadata_is_self_consistent(self) -> None:
         block = re.search(

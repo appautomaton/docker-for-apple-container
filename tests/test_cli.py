@@ -155,7 +155,7 @@ if args and args[0] == "create":
     created_mode = True
     args = ["run", "-d"] + args[1:]
 if args == ["--version"]:
-    print("container CLI version 1.1.0 (fake)")
+    print("container CLI version 1.2.0 (fake)")
     raise SystemExit(0)
 
 if args[:2] == ["system", "status"]:
