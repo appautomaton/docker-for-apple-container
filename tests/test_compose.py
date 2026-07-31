@@ -855,22 +855,36 @@ class ComposeE2ETests(unittest.TestCase):
         self.clear_action_log()
         started = self.docker("compose", "start")
         self.assertEqual(started.returncode, 0, started.stderr)
+        started_actions = self.load_state()["action_log"]
         self.assertEqual(
-            self.load_state()["action_log"],
+            [action for action in started_actions if action[0] == "start"],
             [["start", "demo-db-1"], ["start", "demo-web-1"]],
+        )
+        self.assertEqual(
+            len([action for action in started_actions if action[0] == "exec"]),
+            2,
         )
 
         self.clear_action_log()
         restarted = self.docker("compose", "restart")
         self.assertEqual(restarted.returncode, 0, restarted.stderr)
+        restarted_actions = self.load_state()["action_log"]
         self.assertEqual(
-            self.load_state()["action_log"],
+            [
+                action
+                for action in restarted_actions
+                if action[0] in {"stop", "start"}
+            ],
             [
                 ["stop", "demo-web-1"],
                 ["stop", "demo-db-1"],
                 ["start", "demo-db-1"],
                 ["start", "demo-web-1"],
             ],
+        )
+        self.assertEqual(
+            len([action for action in restarted_actions if action[0] == "exec"]),
+            2,
         )
 
     def test_lifecycle_falls_back_to_stable_label_order_without_file(self) -> None:
@@ -895,9 +909,14 @@ class ComposeE2ETests(unittest.TestCase):
 
         self.clear_action_log()
         self.assertEqual(self.docker("compose", "start").returncode, 0)
+        started_actions = self.load_state()["action_log"]
         self.assertEqual(
-            self.load_state()["action_log"],
+            [action for action in started_actions if action[0] == "start"],
             [["start", "demo-alpha-1"], ["start", "demo-zeta-1"]],
+        )
+        self.assertEqual(
+            len([action for action in started_actions if action[0] == "exec"]),
+            2,
         )
 
     def test_exec_and_rm_reconstruct_membership_from_labels(self) -> None:

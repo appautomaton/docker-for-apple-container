@@ -369,6 +369,9 @@ if args and args[0] == "run":
 
 if args and args[0] == "list":
     data = load()
+    if data.get("list_fail"):
+        print("List failed", file=sys.stderr)
+        raise SystemExit(1)
     include_all = "--all" in args
     rows = []
     for ident, item in data["containers"].items():
@@ -436,6 +439,15 @@ if args and args[0] == "start":
     ident = args[-1]
     data["containers"][ident]["status"]["state"] = "running"
     data["containers"][ident]["status"]["startedDate"] = "2026-01-01T00:00:05Z"
+    if data.get("rotate_network_on_start"):
+        host = int(data.get("next_restart_host", 50))
+        for network in data["containers"][ident]["status"]["networks"]:
+            prefix = network["ipv4Gateway"].rsplit(".", 1)[0]
+            network["ipv4Address"] = f"{prefix}.{host}/24"
+        data["next_restart_host"] = host + 1
+        data["containers"][ident]["files"] = {
+            "/etc/hosts": "127.0.0.1 localhost\n"
+        }
     save(data)
     print(ident)
     raise SystemExit(0)
@@ -683,6 +695,28 @@ class ContainerQueryTests(ShimCLITestCase):
 
 
 class CLIContractTests(ShimCLITestCase):
+    def _run_compose_member(self, name: str, service: str) -> None:
+        result = self.docker(
+            "run",
+            "-d",
+            "--name",
+            name,
+            "--label",
+            "com.docker.compose.project=gateway",
+            "--label",
+            f"com.docker.compose.service={service}",
+            "--label",
+            "com.docker.compose.container-number=1",
+            "--label",
+            "com.docker.compose.oneoff=False",
+            "--network",
+            "gateway_private",
+            "alpine",
+            "sleep",
+            "infinity",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_network_none_is_refused(self) -> None:
         result = self.docker(
             "run", "-d", "--network=none", "alpine", "sleep", "infinity"
@@ -858,9 +892,115 @@ class CLIContractTests(ShimCLITestCase):
 
     def test_restart_composes_stop_then_start(self) -> None:
         self.docker("run", "-d", "--name", "r1", "alpine", "sleep", "infinity")
+        self.clear_container_calls()
         result = self.docker("restart", "r1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "r1")
+        self.assertFalse(
+            any(
+                call[:1] in (["exec"], ["cp"], ["copy"])
+                for call in self.container_calls()
+            )
+        )
+
+    def test_start_refreshes_hosts_for_labeled_project(self) -> None:
+        self._run_compose_member("cpa-manager", "cpa-manager-plus")
+        self._run_compose_member("cli-proxy-api", "cli-proxy-api")
+        self.docker("stop", "cpa-manager")
+        self.update_fake_state(rotate_network_on_start=True, next_restart_host=50)
+        self.clear_container_calls()
+
+        result = self.docker("start", "cpa-manager")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.container_calls()
+        host_writes = [
+            call for call in calls
+            if call[:1] == ["exec"] and "/etc/hosts" in " ".join(call)
+        ]
+        self.assertEqual(len(host_writes), 2)
+        by_container = {call[1]: " ".join(call[2:]) for call in host_writes}
+        self.assertIn("192.168.65.3 cli-proxy-api", by_container["cpa-manager"])
+        self.assertIn(
+            "192.168.65.50 cpa-manager-plus",
+            by_container["cli-proxy-api"],
+        )
+
+    def test_start_leaves_non_compose_container_unchanged(self) -> None:
+        self.docker("create", "--name", "plain", "alpine", "sleep", "infinity")
+        self.clear_container_calls()
+
+        result = self.docker("start", "plain")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(
+            any(
+                call[:1] in (["exec"], ["cp"], ["copy"])
+                for call in self.container_calls()
+            )
+        )
+
+    def test_restart_refreshes_hosts_for_labeled_project(self) -> None:
+        self._run_compose_member("cpa-manager", "cpa-manager-plus")
+        self._run_compose_member("cli-proxy-api", "cli-proxy-api")
+        self.update_fake_state(rotate_network_on_start=True, next_restart_host=50)
+        self.clear_container_calls()
+
+        result = self.docker("restart", "cpa-manager")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.container_calls()
+        host_writes = [
+            call for call in calls
+            if call[:1] == ["exec"] and "/etc/hosts" in " ".join(call)
+        ]
+        self.assertEqual(len(host_writes), 2)
+        by_container = {call[1]: " ".join(call[2:]) for call in host_writes}
+        self.assertIn("192.168.65.3 cli-proxy-api", by_container["cpa-manager"])
+        self.assertIn(
+            "192.168.65.50 cpa-manager-plus",
+            by_container["cli-proxy-api"],
+        )
+
+    def test_restart_refreshes_once_after_multiple_containers(self) -> None:
+        for name, service in (
+            ("cpa-manager", "cpa-manager-plus"),
+            ("cli-proxy-api", "cli-proxy-api"),
+        ):
+            self._run_compose_member(name, service)
+        self.update_fake_state(rotate_network_on_start=True, next_restart_host=50)
+        self.clear_container_calls()
+
+        result = self.docker("restart", "cpa-manager", "cli-proxy-api")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.container_calls()
+        self.assertEqual(
+            sum(call == ["list", "--all", "--format", "json"] for call in calls),
+            1,
+        )
+        last_start = max(
+            i for i, call in enumerate(calls) if call[:1] == ["start"]
+        )
+        first_injection = min(
+            i for i, call in enumerate(calls) if call[:1] == ["exec"]
+        )
+        self.assertLess(last_start, first_injection)
+        scripts = " ".join(" ".join(call) for call in calls if call[:1] == ["exec"])
+        self.assertIn("192.168.65.50 cpa-manager-plus", scripts)
+        self.assertIn("192.168.65.51 cli-proxy-api", scripts)
+
+    def test_restart_warns_when_host_refresh_fails(self) -> None:
+        self._run_compose_member("cpa-manager", "cpa-manager-plus")
+        self.update_fake_state(list_fail=True)
+
+        result = self.docker("restart", "cpa-manager")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "restart completed, but compose service discovery refresh failed",
+            result.stderr,
+        )
 
     def test_exec_forwards_detach_user_and_env_file(self) -> None:
         self.docker("run", "-d", "--name", "e1", "alpine", "sleep", "infinity")

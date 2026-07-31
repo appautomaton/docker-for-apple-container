@@ -9,6 +9,13 @@ Compose forwards `dns`, `dns_search`, and `dns_opt` to Apple. Service-name
 injection is network-scoped: on multi-network stacks, each container receives
 the peer address from the first network they share.
 
+Successful non-attached `docker start` operations reconstruct any affected
+Compose projects from runtime labels and refresh `/etc/hosts` across their
+running members using current network addresses. Bare `docker restart` remains
+Apple's `stop` plus `start` and uses the same refresh. Failures warn without
+overriding a successful lifecycle result, and no shim-owned state is persisted.
+Attached or interactive starts remain direct Apple passthroughs.
+
 Compose supports up, down, ps, logs, build, pull, exec, start, stop, restart,
 rm, config, and ls. Runtime membership comes only from Compose labels stored by
 Apple. Start order is dependency-forward when a file is available; stop and

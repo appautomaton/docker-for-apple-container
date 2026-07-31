@@ -1724,6 +1724,23 @@ def cmd_build(argv: list[str]) -> int:
     return _run_container_passthrough(["build", *opts, context])
 
 
+def _refresh_compose_hosts_after_start(idents: list[str], operation: str) -> None:
+    if not idents:
+        return
+    try:
+        # Lazy import avoids the compose module's intentional dependency on
+        # the Docker-shaped CLI translation helpers in this module.
+        from .compose import refresh_hosts_for_started_containers
+
+        refresh_hosts_for_started_containers(idents)
+    except ShimError as exc:
+        print(
+            f"docker-for-apple-container: {operation} completed, but compose "
+            f"service discovery refresh failed: {exc}",
+            file=sys.stderr,
+        )
+
+
 def cmd_start(argv: list[str]) -> int:
     attach = False
     interactive = False
@@ -1754,13 +1771,16 @@ def cmd_start(argv: list[str]) -> int:
         return _run_container_passthrough(args)
 
     rc = 0
+    started: list[str] = []
     for ident in ids:
         result = _run_container_capture(["start", ident])
         if result.returncode != 0:
             _print_completed(result)
             rc = result.returncode
             continue
+        started.append(ident)
         sys.stdout.write(result.stdout or f"{ident}\n")
+    _refresh_compose_hosts_after_start(started, "start")
     return rc
 
 
@@ -2013,6 +2033,7 @@ def cmd_restart(argv: list[str]) -> int:
 
     # Apple container has no `restart`; compose it from stop + start. Stateless.
     rc = 0
+    restarted: list[str] = []
     for ident in ids:
         stop_args = ["stop"]
         if timeout is not None:
@@ -2028,7 +2049,9 @@ def cmd_restart(argv: list[str]) -> int:
             _print_completed(started)
             rc = started.returncode
             continue
+        restarted.append(ident)
         sys.stdout.write(started.stdout or f"{ident}\n")
+    _refresh_compose_hosts_after_start(restarted, "restart")
     return rc
 
 

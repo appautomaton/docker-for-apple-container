@@ -104,8 +104,10 @@ verified Apple equivalent exists, the shim refuses it explicitly.
 - `docker container inspect ...` is an alias for `docker inspect`
 - `docker port CONTAINER [PRIVATE_PORT[/PROTO]]` and
   `docker container port ...`
-- `docker start CONTAINER...`; attach and interactive modes (`-a`/`-i`)
-  require exactly one container
+- `docker start CONTAINER...`; successful non-attached starts of containers
+  carrying Compose labels refresh that project's `/etc/hosts` mappings from
+  current runtime addresses. Attach and interactive modes (`-a`/`-i`) require
+  exactly one container and remain direct Apple passthroughs.
 - `docker exec [OPTIONS] CONTAINER CMD...`, including detach, interactive/TTY,
   user, environment, environment-file, and working-directory options
 - `docker stop [-s SIGNAL] [-t N] CONTAINER...`
@@ -138,7 +140,9 @@ configuration, and root filesystem layers. Image-list templates support
 - `docker cp SRC DEST`. The positional `container:path` form maps 1:1 onto
   Apple `container copy`. Docker `-a` and `-L` flags are refused.
 - `docker restart [-t N] CONTAINER...`, composed from `stop` + `start` (Apple
-  has no `restart`). No state is kept between the two calls.
+  has no `restart`). It uses the same Compose-label-based host refresh as
+  non-attached `start`. The repair remains best-effort and stateless; a refresh
+  failure warns without changing a successful lifecycle status.
 - `docker export [-o FILE] CONTAINER` maps onto `container export -o`.
   Note: Apple `container export` requires the container to be **stopped**
   (Docker also exports running ones). The shim surfaces Apple's "container

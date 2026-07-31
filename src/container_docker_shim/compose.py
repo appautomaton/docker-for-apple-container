@@ -951,6 +951,61 @@ def _container_ident(row: dict[str, Any]) -> str:
     return str(ident)
 
 
+def refresh_hosts_for_started_containers(idents: list[str]) -> None:
+    """Refresh service discovery for projects containing started containers.
+
+    Bare lifecycle commands have no compose file, so reconstruct the affected
+    projects exclusively from Docker Compose labels already stored by Apple.
+    Current network attachments remain the source of truth for every injected
+    address; no shim-owned state is read or written.
+    """
+    if not idents:
+        return
+    code, rows, err = _load_container_rows(all_containers=True)
+    if code != 0:
+        raise ShimError(err.strip() or "compose: could not list containers", code)
+
+    def matches(row: dict[str, Any], ident: str) -> bool:
+        if str(row.get("name") or "") == ident:
+            return True
+        return any(
+            str(value).startswith(ident)
+            for value in (row.get("id"), row.get("apple_id"))
+            if value
+        )
+
+    affected = {
+        str((row.get("labels") or {}).get(LABEL_PROJECT))
+        for row in rows
+        if any(matches(row, ident) for ident in idents)
+        and (row.get("labels") or {}).get(LABEL_PROJECT)
+    }
+    for project_name in sorted(affected):
+        services: dict[str, dict[str, str]] = {}
+        for row in rows:
+            labels = row.get("labels") or {}
+            if labels.get(LABEL_PROJECT) != project_name:
+                continue
+            service = labels.get(LABEL_SERVICE)
+            number = labels.get(LABEL_NUMBER)
+            name = row.get("name") or row.get("id")
+            if not service or not name:
+                raise ShimError(
+                    f"compose: project container {name or '<unknown>'} is missing "
+                    f"{LABEL_SERVICE}",
+                    64,
+                )
+            if number not in (None, "1") or service in services:
+                raise ShimError(
+                    f"compose: service {service!r} has multiple containers; "
+                    "scaling is not supported",
+                    64,
+                )
+            services[str(service)] = {"container_name": str(name)}
+        project = Project(project_name, {"services": services}, os.getcwd())
+        _inject_etc_hosts(project, project.topo_sorted())
+
+
 def _all_projects() -> dict[str, list[dict[str, Any]]]:
     code, rows, err = _load_container_rows(all_containers=True)
     if code != 0:
