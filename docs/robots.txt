@@ -5,7 +5,7 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://appautomaton.github.io/docker-for-apple-container/sitemap.xml
+Sitemap: https://appautomaton.renocrypt.com/docker-for-apple-container/sitemap.xml
 
 # ── Explicit AI crawler allow-list (redundant but explicit) ──
 User-agent: GPTBot
