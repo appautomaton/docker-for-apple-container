@@ -58,20 +58,25 @@
     "@graph": [
       {
         "@type": "Organization",
-        "@id": "https://appautomaton.renocrypt.com/docker-for-apple-container/#org",
-        "name": "AppCubic",
-        "url": "https://github.com/appautomaton",
-        "logo": "https://appautomaton.renocrypt.com/docker-for-apple-container/assets/img/favicon.svg",
+        "@id": "https://appautomaton.renocrypt.com/#org",
+        "name": "App Automaton",
+        "url": "https://appautomaton.renocrypt.com/",
+        "logo": "https://appautomaton.renocrypt.com/apple-touch-icon.png",
+        "parentOrganization": {
+          "@type": "Organization",
+          "name": "AppCubic",
+          "url": "https://appcubic.com"
+        },
         "sameAs": [
           "https://github.com/appautomaton",
-          "https://github.com/appautomaton/docker-for-apple-container",
-          "https://github.com/appautomaton/homebrew-tap"
+          "https://huggingface.co/appautomaton"
         ]
       },
       {
         "@type": "SoftwareApplication",
         "@id": "https://appautomaton.renocrypt.com/docker-for-apple-container/#project",
         "name": "docker-for-apple-container",
+        "alternateName": ["Docker for Apple Container", "docker for apple container"],
         "description": "A small, stateless docker CLI shim for Apple's container CLI on macOS. It lets tools that expect a docker binary run against Apple container, without Docker Desktop, Podman, or a third-party adapter.",
         "url": "https://appautomaton.renocrypt.com/docker-for-apple-container/",
         "isPartOf": { "@id": "https://appautomaton.renocrypt.com/#website" },
@@ -83,7 +88,7 @@
         "license": "https://github.com/appautomaton/docker-for-apple-container/blob/main/LICENSE",
         "downloadUrl": "https://github.com/appautomaton/docker-for-apple-container/releases",
         "codeRepository": "https://github.com/appautomaton/docker-for-apple-container",
-        "publisher": { "@id": "https://appautomaton.renocrypt.com/docker-for-apple-container/#org" },
+        "publisher": { "@id": "https://appautomaton.renocrypt.com/#org" },
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
       },
       {
