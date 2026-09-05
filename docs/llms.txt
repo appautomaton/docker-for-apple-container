@@ -28,8 +28,10 @@ and anonymous-volume removal remain deferred and are never approximated.
 
 ## Runtime compatibility
 
-- Requires macOS 26 with Apple `container` 1.2.0 or newer.
-- The current compatibility baseline is Apple `container` 1.2.0.
+- Requires macOS 26 with Apple `container` 1.3.1 only.
+- Only Apple `container` 1.3.1 is supported. There is no backward compatibility
+  with older releases or implied support for newer ones. The supported version
+  advances explicitly after validation.
 - Apple's Containerization Swift package is bundled by Apple as part of
   `container`; it is not a direct shim dependency or a separate installation.
 
@@ -47,7 +49,7 @@ provides Docker-shaped columns, JSON lines, bounded templates, and stateless
 `ancestor`, `network`, and `volume` filters. `docker port` reads published-port
 bindings from the same runtime object.
 
-Lifecycle flags map directly where Apple 1.2 exposes the same behavior:
+Lifecycle flags map directly where Apple 1.3.1 exposes the same behavior:
 `docker exec` supports detach, user, environment files, interactive/TTY, and
 working-directory flags; `docker start` supports attach and interactive; and
 `docker stop` supports timeout and signal selection. `docker system df` forwards

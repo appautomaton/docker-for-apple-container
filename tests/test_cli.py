@@ -155,7 +155,7 @@ if args and args[0] == "create":
     created_mode = True
     args = ["run", "-d"] + args[1:]
 if args == ["--version"]:
-    print("container CLI version 1.2.0 (fake)")
+    print("container CLI version 1.3.1 (fake)")
     raise SystemExit(0)
 
 if args[:2] == ["system", "status"]:
@@ -167,11 +167,17 @@ if args[:2] == ["system", "df"]:
     raise SystemExit(0)
 
 if args[:2] == ["image", "inspect"]:
+    if "image_payload" in load():
+        print(json.dumps(load()["image_payload"]))
+        raise SystemExit(0)
     images = args[2:]
     print(json.dumps([image_record(image) for image in images]))
     raise SystemExit(0)
 
 if args[:2] == ["image", "list"]:
+    if "image_payload" in load():
+        print(json.dumps(load()["image_payload"]))
+        raise SystemExit(0)
     print(
         json.dumps(
             [
@@ -348,7 +354,7 @@ if args and args[0] == "run":
             "creationDate": "2026-01-01T00:00:00Z",
         },
         "status": {
-            "state": "created" if created_mode else "running",
+            "state": "stopped" if created_mode else "running",
             "startedDate": None if created_mode else "2026-01-01T00:00:05Z",
             "networks": [
                 {
@@ -369,6 +375,9 @@ if args and args[0] == "run":
 
 if args and args[0] == "list":
     data = load()
+    if "list_payload" in data:
+        print(json.dumps(data["list_payload"]))
+        raise SystemExit(0)
     if data.get("list_fail"):
         print("List failed", file=sys.stderr)
         raise SystemExit(1)
@@ -386,11 +395,8 @@ if args and args[0] == "list":
 if args and args[0] == "inspect":
     data = load()
     ident = args[-1]
-    if ident in data.get("inspect_fail", []):
-        print("Inspect failed", file=sys.stderr)
-        raise SystemExit(1)
-    if ident in data.get("inspect_malformed", []):
-        print("not-json")
+    if "inspect_payload" in data:
+        print(json.dumps(data["inspect_payload"]))
         raise SystemExit(0)
     item = data["containers"].get(ident)
     if not item:
@@ -621,7 +627,7 @@ class ContainerQueryTests(ShimCLITestCase):
             ],
         )
 
-    def test_only_incomplete_list_rows_are_inspected(self) -> None:
+    def test_incomplete_list_rows_fail_without_inspect_fallback(self) -> None:
         paths = (
             "id",
             "configuration.image.reference",
@@ -633,8 +639,8 @@ class ContainerQueryTests(ShimCLITestCase):
                 self.clear_container_calls()
                 Path(self.env["FAKE_CONTAINER_STATE"]).unlink(missing_ok=True)
                 self.run_container("complete", label="role=worker")
-                self.run_container("fallback", label="role=worker")
-                self.update_fake_state(list_omit={"fallback": [path]})
+                self.run_container("incomplete", label="role=worker")
+                self.update_fake_state(list_omit={"incomplete": [path]})
                 self.clear_container_calls()
 
                 result = self.docker(
@@ -645,42 +651,28 @@ class ContainerQueryTests(ShimCLITestCase):
                     "--format",
                     "{{.ID}}",
                 )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(
-                    result.stdout.splitlines(), ["complete", "fallback"]
-                )
-                self.assertEqual(
-                    self.container_calls(),
-                    [
-                        ["list", "--all", "--format", "json"],
-                        ["inspect", "fallback"],
-                    ],
-                )
-
-    def test_failed_or_malformed_fallback_keeps_list_data(self) -> None:
-        for mode in ("inspect_fail", "inspect_malformed"):
-            with self.subTest(mode=mode):
-                self.clear_container_calls()
-                Path(self.env["FAKE_CONTAINER_STATE"]).unlink(missing_ok=True)
-                self.run_container("partial")
-                self.update_fake_state(
-                    list_omit={"partial": ["configuration.labels"]},
-                    **{mode: ["partial"]},
-                )
-                self.clear_container_calls()
-
-                result = self.docker(
-                    "ps", "-a", "--format", "{{.ID}}\t{{.Image}}\t{{.State}}"
-                )
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout.strip(), "partial\talpine\trunning")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("expected Apple container 1.3.1", result.stderr)
                 self.assertEqual(
                     self.container_calls(),
                     [
                         ["list", "--all", "--format", "json"],
-                        ["inspect", "partial"],
                     ],
                 )
+
+    def test_other_list_schemas_are_rejected_without_exposing_payload(self) -> None:
+        self.run_container("current")
+        legacy = {"ID": "old", "Image": "alpine", "State": "running", "Labels": {}}
+        for payload in [{"containers": []}, {"items": []}, [legacy], ["secret-fixture-value"]]:
+            with self.subTest(payload=payload):
+                self.update_fake_state(list_payload=payload)
+                self.clear_container_calls()
+                result = self.docker("ps", "-a")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertNotIn("secret-fixture-value", result.stderr)
+                self.assertEqual(self.container_calls(), [["list", "--all", "--format", "json"]])
 
     def test_direct_inspect_still_calls_apple_inspect(self) -> None:
         self.run_container("direct")
@@ -1176,7 +1168,7 @@ class CLIContractTests(ShimCLITestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "c1")
-        # Created but not running: it appears in `ps -a` with state "created".
+        # Apple reports a never-started container as stopped, translated to exited.
         ps_all = self.docker(
             "ps",
             "-a",
@@ -1185,7 +1177,7 @@ class CLIContractTests(ShimCLITestCase):
             "--format",
             "{{.ID}}\t{{.State}}",
         )
-        self.assertEqual(ps_all.stdout.strip(), "c1\tcreated")
+        self.assertEqual(ps_all.stdout.strip(), "c1\texited")
 
     def test_create_detach_is_refused(self) -> None:
         result = self.docker("create", "-d", "alpine")

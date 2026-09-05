@@ -1064,7 +1064,7 @@ def _container_networks(name: str) -> list[NetworkAttachment]:
         data = json.loads(result.stdout or "[]")
     except ValueError:
         return []
-    item = data[0] if isinstance(data, list) and data else data
+    item = data[0] if isinstance(data, list) and len(data) == 1 else None
     if not isinstance(item, dict):
         return []
     networks = (item.get("status") or {}).get("networks") or []
@@ -1295,7 +1295,7 @@ def _image_default_argv(image: str, platform_hint: str | None) -> tuple[list[str
         data = json.loads(result.stdout or "[]")
     except ValueError:
         return None
-    item = data[0] if isinstance(data, list) and data else data
+    item = data[0] if isinstance(data, list) and len(data) == 1 else None
     if not isinstance(item, dict):
         return None
     variants = [v for v in item.get("variants") or [] if isinstance(v, dict)]

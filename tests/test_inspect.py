@@ -7,6 +7,16 @@ import test_cli
 
 
 class InspectTests(test_cli.ShimCLITestCase):
+    def test_inspect_rejects_unexpected_runtime_schema(self) -> None:
+        self.run_container("current")
+        for payload in [{"id": "current"}, [], [{"id": "current"}]]:
+            with self.subTest(payload=payload):
+                self.update_fake_state(inspect_payload=payload)
+                result = self.docker("inspect", "current")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("expected Apple container 1.3.1", result.stderr)
+
     def run_container(
         self, name: str, *, labels: tuple[str, ...] = (), network: str | None = None
     ) -> None:
@@ -19,7 +29,7 @@ class InspectTests(test_cli.ShimCLITestCase):
         result = self.docker(*args)
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_finished_at_is_real_for_stopped_container(self) -> None:
+    def test_stopped_container_preserves_last_known_time_approximation(self) -> None:
         self.run_container("reap-me")
         stop = self.docker("stop", "reap-me")
         self.assertEqual(stop.returncode, 0, stop.stderr)
@@ -164,7 +174,7 @@ class InspectTests(test_cli.ShimCLITestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "\n")
 
-    def test_created_container_uses_zero_state_timestamps(self) -> None:
+    def test_never_started_container_uses_creation_time_approximation(self) -> None:
         created = self.docker("create", "--name", "created", "alpine", "true")
         self.assertEqual(created.returncode, 0, created.stderr)
         result = self.docker(
@@ -176,7 +186,7 @@ class InspectTests(test_cli.ShimCLITestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             result.stdout.strip(),
-            "0001-01-01T00:00:00Z 0001-01-01T00:00:00Z",
+            "0001-01-01T00:00:00Z 2026-01-01T00:00:00Z",
         )
 
     def test_unknown_or_composite_fields_fail_without_partial_output(self) -> None:

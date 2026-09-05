@@ -64,7 +64,7 @@ def take(a, i):
 a = sys.argv[1:]
 
 if a[:1] == ["--version"]:
-    print("container CLI version 1.2.0 (fake)"); raise SystemExit(0)
+    print("container CLI version 1.3.1 (fake)"); raise SystemExit(0)
 if a[:2] == ["system", "status"]:
     print("apiserver is running"); raise SystemExit(0)
 
@@ -127,7 +127,7 @@ if a[:1] == ["run"]:
     save(d); print(name); raise SystemExit(0)
 
 if a[:2] == ["image", "inspect"]:
-    print(json.dumps([{"name": a[-1], "variants": [
+    print(json.dumps([{"configuration": {"name": a[-1]}, "variants": [
         {"platform": {"os": "linux", "architecture": "arm64"},
          "config": {"config": {"Entrypoint": ["/entry"], "Cmd": ["serve"]}}}]}]))
     raise SystemExit(0)
@@ -140,13 +140,13 @@ if a[:1] == ["list"]:
     d = load(); allc = "--all" in a
     rows = [c for c in d["containers"].values()
             if allc or c["status"]["state"] == "running"]
-    print(json.dumps(rows)); raise SystemExit(0)
+    print(json.dumps([{k: c[k] for k in ("id", "configuration", "status")} for c in rows])); raise SystemExit(0)
 
 if a[:1] == ["inspect"]:
     d = load(); ident = a[-1]; c = d["containers"].get(ident)
     if not c:
         print("No such container", file=sys.stderr); raise SystemExit(1)
-    print(json.dumps([c])); raise SystemExit(0)
+    print(json.dumps([{k: c[k] for k in ("id", "configuration", "status")}])); raise SystemExit(0)
 
 if a[:1] == ["stop"]:
     d = load(); ident = a[-1]

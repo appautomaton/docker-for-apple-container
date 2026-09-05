@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from container_docker_shim.cli import print_help  # noqa: E402
+from container_docker_shim.cli import SUPPORTED_CONTAINER_VERSION, print_help  # noqa: E402
 
 
 class DocumentationConsistencyTests(unittest.TestCase):
@@ -29,8 +29,9 @@ class DocumentationConsistencyTests(unittest.TestCase):
         }
         for name, document in documents.items():
             with self.subTest(document=name):
-                self.assertIn("1.2.0", document)
-                self.assertNotIn("1.1.0", document)
+                self.assertIn(SUPPORTED_CONTAINER_VERSION, document)
+                self.assertIn("no backward compatibility", document.lower())
+                self.assertNotRegex(document, r"1\.[12]\.\d+|1\.3\.1 (?:or newer|or later|\+)")
 
     def test_site_metadata_is_self_consistent(self) -> None:
         block = re.search(
@@ -95,6 +96,7 @@ class DocumentationConsistencyTests(unittest.TestCase):
         with contextlib.redirect_stdout(output):
             print_help()
         help_text = output.getvalue()
+        self.assertIn(f"Supported runtime: Apple container {SUPPORTED_CONTAINER_VERSION} only", help_text)
         self.assertIn("images, image inspect", help_text)
         self.assertNotIn("image <sub>", help_text)
         self.assertIn(

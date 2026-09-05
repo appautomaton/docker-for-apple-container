@@ -12,6 +12,7 @@ from typing import Any
 
 
 DOCKER_ZERO_TIME = "0001-01-01T00:00:00Z"
+SUPPORTED_CONTAINER_VERSION = "1.3.1"
 
 
 class ShimError(Exception):
@@ -148,39 +149,8 @@ def _is_go_template(value: str) -> bool:
 
 
 def _labels_from_item(item: dict[str, Any]) -> dict[str, str]:
-    raw = (
-        item.get("labels")
-        or item.get("Labels")
-        or item.get("annotations")
-        or _deep_get(item, "configuration", "labels")
-        or _deep_get(item, "Config", "Labels")
-        or {}
-    )
-    if isinstance(raw, dict):
-        return {str(k): str(v) for k, v in raw.items()}
-    if isinstance(raw, list):
-        labels: dict[str, str] = {}
-        for entry in raw:
-            if isinstance(entry, str):
-                key, value = _parse_key_value(entry)
-                labels[key] = value
-        return labels
-    return {}
-
-
-def _item_has_labels(item: dict[str, Any]) -> bool:
-    candidates = (
-        ("labels",),
-        ("Labels",),
-        ("annotations",),
-        ("configuration", "labels"),
-        ("Config", "Labels"),
-    )
-    for path in candidates:
-        raw = _deep_get(item, *path)
-        if isinstance(raw, (dict, list)):
-            return True
-    return False
+    raw = _deep_get(item, "configuration", "labels") or {}
+    return {str(k): str(v) for k, v in raw.items()}
 
 
 def _deep_get(item: Any, *path: str) -> Any:
@@ -190,42 +160,6 @@ def _deep_get(item: Any, *path: str) -> Any:
             return None
         cur = cur[part]
     return cur
-
-
-def _first_present(item: dict[str, Any], keys: tuple[str, ...]) -> Any:
-    for key in keys:
-        value = item.get(key)
-        if value not in (None, ""):
-            return value
-    return None
-
-
-def _state_from_item(item: dict[str, Any]) -> Any:
-    candidates = (
-        _deep_get(item, "status", "state"),
-        _deep_get(item, "Status", "State"),
-        item.get("state"),
-        item.get("State"),
-        item.get("status"),
-        item.get("Status"),
-    )
-    for value in candidates:
-        if value not in (None, "") and not isinstance(value, (dict, list)):
-            return value
-    return None
-
-
-def _image_reference_from_item(item: dict[str, Any]) -> Any:
-    candidates = (
-        item.get("image"),
-        item.get("Image"),
-        _deep_get(item, "configuration", "image", "reference"),
-        _deep_get(item, "image", "reference"),
-    )
-    for value in candidates:
-        if value not in (None, "") and not isinstance(value, (dict, list)):
-            return value
-    return None
 
 
 def _docker_state(value: Any) -> str:
@@ -244,7 +178,7 @@ def _without_cidr(value: Any) -> str:
 
 
 def _normalize_networks(item: dict[str, Any]) -> list[dict[str, str]]:
-    raw = _deep_get(item, "status", "networks") or item.get("networks") or []
+    raw = _deep_get(item, "status", "networks") or []
     if not isinstance(raw, list):
         return []
 
@@ -252,35 +186,19 @@ def _normalize_networks(item: dict[str, Any]) -> list[dict[str, str]]:
     for attachment in raw:
         if not isinstance(attachment, dict):
             continue
-        name = str(
-            attachment.get("network")
-            or attachment.get("name")
-            or attachment.get("NetworkID")
-            or ""
-        )
+        name = str(attachment.get("network") or "")
         if not name:
             continue
         networks.append(
             {
                 "name": name,
-                "ipv4": _without_cidr(
-                    attachment.get("ipv4Address") or attachment.get("address")
-                ),
-                "gateway": str(
-                    attachment.get("ipv4Gateway")
-                    or attachment.get("gateway")
-                    or ""
-                ),
+                "ipv4": _without_cidr(attachment.get("ipv4Address")),
+                "gateway": str(attachment.get("ipv4Gateway") or ""),
                 "ipv6": _without_cidr(attachment.get("ipv6Address")),
                 "mac": str(attachment.get("macAddress") or ""),
             }
         )
     return networks
-
-
-def _container_configuration(item: dict[str, Any]) -> dict[str, Any]:
-    configuration = item.get("configuration") or item.get("Config") or {}
-    return configuration if isinstance(configuration, dict) else {}
 
 
 def _normalize_process(item: dict[str, Any]) -> dict[str, Any]:
@@ -289,9 +207,7 @@ def _normalize_process(item: dict[str, Any]) -> dict[str, Any]:
         process = {}
     user = process.get("user") or {}
     rendered_user = ""
-    if isinstance(user, str):
-        rendered_user = user
-    elif isinstance(user, dict):
+    if isinstance(user, dict):
         user_id = user.get("id") or {}
         raw = user.get("raw") or {}
         if isinstance(user_id, dict) and (
@@ -317,8 +233,6 @@ def _normalize_process(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _mount_type(raw: Any) -> tuple[str, str]:
-    if isinstance(raw, str):
-        return raw, ""
     if not isinstance(raw, dict) or not raw:
         return "bind", ""
     name = next(iter(raw))
@@ -332,7 +246,7 @@ def _mount_type(raw: Any) -> tuple[str, str]:
 
 
 def _normalize_mounts(item: dict[str, Any]) -> list[dict[str, Any]]:
-    mounts = _deep_get(item, "configuration", "mounts") or item.get("mounts") or []
+    mounts = _deep_get(item, "configuration", "mounts") or []
     if not isinstance(mounts, list):
         return []
     normalized: list[dict[str, Any]] = []
@@ -401,47 +315,44 @@ def _normalize_resources(item: dict[str, Any]) -> dict[str, int]:
 
 
 def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
-    item_id = _first_present(item, ("id", "ID", "containerID", "container_id"))
-    name = _first_present(item, ("name", "Name", "names", "Names"))
-    if isinstance(name, list):
-        name = name[0] if name else None
-    item_id = str(item_id or name or "")
-    name = str(name or item_id)
+    """Translate the supported runtime's container JSON without schema guessing."""
+    item_id = item.get("id")
+    image = _deep_get(item, "configuration", "image", "reference")
+    raw_state = _deep_get(item, "status", "state")
+    if not (
+        isinstance(item_id, str) and item_id
+        and isinstance(image, str) and image
+        and isinstance(raw_state, str) and raw_state
+        and isinstance(_deep_get(item, "configuration", "labels"), dict)
+    ):
+        raise ShimError(
+            f"unexpected container JSON; expected Apple container {SUPPORTED_CONTAINER_VERSION} "
+            "id, configuration.image.reference, configuration.labels, and status.state"
+        )
+    name = item_id
 
     labels = _labels_from_item(item)
 
-    raw_state = _state_from_item(item)
     docker_state = _docker_state(raw_state)
     created_at = str(
         _deep_get(item, "configuration", "creationDate")
-        or item.get("creationDate")
-        or item.get("Created")
         or DOCKER_ZERO_TIME
     )
     started_at = str(
         _deep_get(item, "status", "startedDate")
-        or item.get("startedDate")
-        or item.get("StartedAt")
         or DOCKER_ZERO_TIME
     )
-    explicit_finished_at = (
-        _deep_get(item, "status", "finishedDate")
-        or _deep_get(item, "status", "finishedAt")
-        or _deep_get(item, "status", "stoppedDate")
-        or _deep_get(item, "status", "terminatedDate")
-        or item.get("finishedAt")
-        or item.get("FinishedAt")
-    )
+    # Apple does not expose a stop timestamp. Preserve the existing Docker
+    # presentation's last-known-time approximation for exited containers.
     if docker_state == "exited":
         finished_at = str(
-            explicit_finished_at
-            or (started_at if started_at != DOCKER_ZERO_TIME else None)
+            (started_at if started_at != DOCKER_ZERO_TIME else None)
             or (created_at if created_at != DOCKER_ZERO_TIME else None)
             or DOCKER_ZERO_TIME
         )
     else:
-        finished_at = str(explicit_finished_at or DOCKER_ZERO_TIME)
-    configuration = _container_configuration(item)
+        finished_at = DOCKER_ZERO_TIME
+    configuration = item["configuration"]
     process = _normalize_process(item)
     resources = _normalize_resources(item)
     mounts = _normalize_mounts(item)
@@ -455,12 +366,9 @@ def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
         "id": str(item_id or name),
         "apple_id": str(item_id or name),
         "name": str(name or item_id),
-        "image": str(_image_reference_from_item(item) or ""),
+        "image": image,
         "image_id": str(
             _deep_get(item, "configuration", "image", "descriptor", "digest")
-            or _deep_get(item, "image", "descriptor", "digest")
-            or item.get("imageID")
-            or item.get("ImageID")
             or ""
         ),
         "state": docker_state,
@@ -491,33 +399,6 @@ def _normalize_list_item(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _normalize_inspect_item(item: dict[str, Any], ident: str) -> dict[str, Any]:
-    row = _normalize_list_item(item)
-    if not row["id"]:
-        row["id"] = ident
-    if not row["apple_id"]:
-        row["apple_id"] = ident
-    if not row["name"]:
-        row["name"] = ident
-    return row
-
-
-def _list_item_is_complete(item: dict[str, Any], row: dict[str, Any]) -> bool:
-    """Whether Apple list JSON has everything current list consumers need.
-
-    Apple container 1.2.0 returns the full configuration and status object from
-    ``container list --format json``. Keep a per-record inspect fallback for a
-    missing identity, image, state, or labels block so newer schemas degrade
-    safely without restoring an inspect call for every listed container.
-    """
-    return bool(
-        row.get("id")
-        and _image_reference_from_item(item) is not None
-        and _state_from_item(item) is not None
-        and _item_has_labels(item)
-    )
-
-
 def _inspect_container_item(ident: str) -> dict[str, Any] | None:
     result = _run_container_capture(["inspect", ident])
     if result.returncode != 0:
@@ -526,7 +407,7 @@ def _inspect_container_item(ident: str) -> dict[str, Any] | None:
         data = json.loads(result.stdout or "[]")
     except ValueError:
         return None
-    item = data[0] if isinstance(data, list) and data else data
+    item = data[0] if isinstance(data, list) and len(data) == 1 else None
     return item if isinstance(item, dict) else None
 
 
@@ -541,27 +422,15 @@ def _load_container_rows(all_containers: bool) -> tuple[int, list[dict[str, Any]
     try:
         data = json.loads(result.stdout or "[]")
     except ValueError as exc:
-        return 1, [], f"could not parse container list JSON: {exc}\n{result.stdout}"
-    if isinstance(data, dict):
-        data = data.get("containers") or data.get("items") or [data]
+        return 1, [], f"could not parse container list JSON: {exc}"
     if not isinstance(data, list):
-        data = []
+        return 1, [], f"expected Apple container {SUPPORTED_CONTAINER_VERSION} list JSON array"
 
     rows: list[dict[str, Any]] = []
     for item in data:
         if not isinstance(item, dict):
-            continue
+            return 1, [], "expected a container object in list JSON"
         row = _normalize_list_item(item)
-        if not _list_item_is_complete(item, row):
-            ident = (
-                row.get("apple_id")
-                or row.get("id")
-                or row.get("name")
-                or _deep_get(item, "configuration", "id")
-            )
-            inspected = _inspect_container_item(str(ident)) if ident else None
-            if inspected is not None:
-                row = _normalize_inspect_item(inspected, str(ident))
         rows.append(row)
     return 0, rows, ""
 
@@ -792,9 +661,9 @@ def _docker_image_object(
     if not isinstance(platform, dict):
         platform = {}
 
-    reference = str(configuration.get("name") or item.get("name") or "")
+    reference = str(configuration.get("name") or "")
     repository, _tag = _split_image_reference(reference) if reference else ("", "")
-    digest = str(descriptor.get("digest") or item.get("id") or "")
+    digest = str(descriptor.get("digest") or "")
     created = str(
         variant_config.get("created")
         or configuration.get("creationDate")
@@ -840,11 +709,11 @@ def _docker_image_list_row(item: dict[str, Any], *, no_trunc: bool) -> dict[str,
     descriptor = configuration.get("descriptor") or {}
     if not isinstance(descriptor, dict):
         descriptor = {}
-    reference = str(configuration.get("name") or item.get("name") or "")
+    reference = str(configuration.get("name") or "")
     repository, tag = (
         _split_image_reference(reference) if reference else ("<none>", "<none>")
     )
-    digest = str(descriptor.get("digest") or item.get("id") or "")
+    digest = str(descriptor.get("digest") or "")
     image_id = digest if no_trunc else digest.removeprefix("sha256:")[:12]
     created = str(configuration.get("creationDate") or DOCKER_ZERO_TIME)
     size = int(descriptor.get("size") or 0)
@@ -1138,11 +1007,13 @@ def cmd_image_inspect(argv: list[str]) -> int:
         data = json.loads(result.stdout or "[]")
     except ValueError as exc:
         return _die(f"could not parse image inspect JSON: {exc}")
-    items = data if isinstance(data, list) else [data]
+    if not isinstance(data, list):
+        return _die(f"expected Apple container {SUPPORTED_CONTAINER_VERSION} image inspect JSON array")
+    if any(not isinstance(item, dict) for item in data):
+        return _die("expected an image object in image inspect JSON")
     objects = [
         _docker_image_object(item, requested_platform)
-        for item in items
-        if isinstance(item, dict)
+        for item in data
     ]
 
     if fmt == "json":
@@ -1201,14 +1072,13 @@ def cmd_image_list(argv: list[str]) -> int:
         data = json.loads(result.stdout or "[]")
     except ValueError as exc:
         return _die(f"could not parse image list JSON: {exc}")
-    if isinstance(data, dict):
-        data = data.get("images") or data.get("items") or [data]
     if not isinstance(data, list):
-        data = []
+        return _die(f"expected Apple container {SUPPORTED_CONTAINER_VERSION} image list JSON array")
+    if any(not isinstance(item, dict) for item in data):
+        return _die("expected an image object in image list JSON")
     rows = [
         _docker_image_list_row(item, no_trunc=no_trunc)
         for item in data
-        if isinstance(item, dict)
     ]
 
     if quiet:
@@ -1374,10 +1244,10 @@ def cmd_inspect(argv: list[str]) -> int:
             data = json.loads(result.stdout or "[]")
         except ValueError as exc:
             return _die(f"could not parse inspect JSON for {ident}: {exc}")
-        item = data[0] if isinstance(data, list) and data else data
+        item = data[0] if isinstance(data, list) and len(data) == 1 else None
         if not isinstance(item, dict):
-            item = {}
-        row = _normalize_inspect_item(item, ident)
+            return _die(f"expected Apple container {SUPPORTED_CONTAINER_VERSION} inspect JSON array for {ident}")
+        row = _normalize_list_item(item)
         objects.append(_docker_inspect_object(row))
 
     if fmt == "json":
@@ -1427,7 +1297,7 @@ def cmd_port(argv: list[str]) -> int:
     item = _inspect_container_item(ident)
     if item is None:
         return _die(f"could not inspect container: {ident}", 1)
-    row = _normalize_inspect_item(item, ident)
+    row = _normalize_list_item(item)
     ports = row.get("ports") or {}
     if private_port is not None:
         bindings = ports.get(private_port) or []
@@ -2224,6 +2094,7 @@ def cmd_proxy(container_args: list[str]) -> int:
 
 def print_help() -> None:
     print("docker-for-apple-container: Docker CLI subset over Apple container")
+    print(f"Supported runtime: Apple container {SUPPORTED_CONTAINER_VERSION} only")
     print()
     print("Translated:  version, info, build, run, create, ps, inspect,")
     print("             images, image inspect, port, start, exec, stop, restart, rm,")

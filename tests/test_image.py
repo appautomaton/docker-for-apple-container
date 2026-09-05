@@ -13,6 +13,17 @@ class ImagePresentationTests(test_cli.ShimCLITestCase):
     https://docs.docker.com/reference/cli/docker/image/ls/
     """
 
+    def test_image_commands_reject_non_array_runtime_schemas(self) -> None:
+        self.docker("create", "--name", "fixture", "alpine", "true")
+        for payload in [{"images": []}, {"items": []}, ["invalid"]]:
+            self.update_fake_state(image_payload=payload)
+            for command in [("images",), ("image", "inspect", "alpine")]:
+                with self.subTest(payload=payload, command=command):
+                    result = self.docker(*command)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout, "")
+                    self.assertIn("expected", result.stderr)
+
     def test_image_inspect_default_is_docker_shaped(self) -> None:
         result = self.docker("image", "inspect", "example/app:1.0")
         self.assertEqual(result.returncode, 0, result.stderr)

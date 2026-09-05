@@ -9,7 +9,7 @@ class HermesContractTests(test_cli.ShimCLITestCase):
     def test_hermes_lifecycle_contract(self) -> None:
         version = self.docker("version")
         self.assertEqual(version.returncode, 0, version.stderr)
-        self.assertIn("container CLI version 1.2.0", version.stdout)
+        self.assertIn("container CLI version 1.3.1", version.stdout)
 
         image = self.docker(
             "image",
