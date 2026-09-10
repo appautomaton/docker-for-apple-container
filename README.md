@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue?style=flat-square)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%28Apple%20Silicon%29-lightgrey?style=flat-square)](#requirements)
-[![Website](https://img.shields.io/badge/website-appautomaton.renocrypt.com-blue?style=flat-square)](https://appautomaton.renocrypt.com/docker-for-apple-container/)
+[![Website](https://img.shields.io/badge/website-appautomaton.com-blue?style=flat-square)](https://appautomaton.com/docker-for-apple-container/)
 
 > Run `docker` and `docker compose` on macOS, backed by Apple's native `container` CLI. No Docker Desktop.
 
