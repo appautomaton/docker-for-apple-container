@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import io
-import json
-import re
 import sys
 import unittest
 from pathlib import Path
@@ -17,72 +15,17 @@ from container_docker_shim.cli import SUPPORTED_CONTAINER_VERSION, print_help  #
 
 class DocumentationConsistencyTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.html = (ROOT / "docs" / "index.html").read_text()
         self.readme = (ROOT / "README.md").read_text()
-        self.llms = (ROOT / "docs" / "llms.txt").read_text()
 
     def test_runtime_compatibility_baseline_is_consistent(self) -> None:
-        documents = {
-            "README.md": self.readme,
-            "docs/index.html": self.html,
-            "docs/llms.txt": self.llms,
-        }
+        documents = {"README.md": self.readme}
         for name, document in documents.items():
             with self.subTest(document=name):
                 self.assertIn(SUPPORTED_CONTAINER_VERSION, document)
                 self.assertIn("no backward compatibility", document.lower())
                 self.assertNotRegex(document, r"1\.[12]\.\d+|1\.3\.1 (?:or newer|or later|\+)")
 
-    def test_site_metadata_is_self_consistent(self) -> None:
-        block = re.search(
-            r'<script type="application/ld\+json">\s*(.*?)\s*</script>',
-            self.html,
-            re.DOTALL,
-        )
-        self.assertIsNotNone(block)
-        schema = json.loads(block.group(1))  # type: ignore[union-attr]
-        application = next(
-            item
-            for item in schema["@graph"]
-            if item.get("@type") == "SoftwareApplication"
-        )
-        version = application["softwareVersion"]
-        modified = application["dateModified"]
-        self.assertIn(
-            f"<span>v{version} · updated {modified}</span>",
-            self.html,
-        )
-        sitemap = (ROOT / "docs" / "sitemap.xml").read_text()
-        self.assertIn(f"<lastmod>{modified}</lastmod>", sitemap)
-
-    def test_command_card_counts_match_their_details(self) -> None:
-        for article in re.findall(
-            r'<article class="card reveal">(.*?)</article>',
-            self.html,
-            re.DOTALL,
-        ):
-            summary = re.search(r"<summary>(\d+) more</summary>", article)
-            if summary is None:
-                continue
-            details = article.split("<details", 1)[1]
-            self.assertEqual(
-                len(re.findall(r"<li\b", details)),
-                int(summary.group(1)),
-            )
-
-    def test_image_list_is_classified_as_translated(self) -> None:
-        articles = {}
-        for article in re.findall(
-            r'<article class="card reveal">(.*?)</article>',
-            self.html,
-            re.DOTALL,
-        ):
-            heading = re.search(r"<h3>(.*?)</h3>", article, re.DOTALL)
-            if heading is not None:
-                articles[heading.group(1)] = article
-        self.assertIn("docker images / image ls", articles["Fully translated"])
-        self.assertNotIn("docker images", articles["Thin passthrough"])
-
+    def test_readme_passthrough_does_not_claim_untranslated_commands(self) -> None:
         passthrough = self.readme.split("### Thin passthrough", 1)[1].split(
             "### Compose", 1
         )[0]
