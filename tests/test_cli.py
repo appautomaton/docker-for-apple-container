@@ -155,7 +155,7 @@ if args and args[0] == "create":
     created_mode = True
     args = ["run", "-d"] + args[1:]
 if args == ["--version"]:
-    print("container CLI version 1.3.1 (fake)")
+    print("container CLI version 1.4.1 (fake)")
     raise SystemExit(0)
 
 if args[:2] == ["system", "status"]:
@@ -653,7 +653,7 @@ class ContainerQueryTests(ShimCLITestCase):
                 )
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, "")
-                self.assertIn("expected Apple container 1.3.1", result.stderr)
+                self.assertIn("expected Apple container 1.4.1", result.stderr)
                 self.assertEqual(
                     self.container_calls(),
                     [

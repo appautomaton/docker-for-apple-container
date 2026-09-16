@@ -12,7 +12,7 @@ from typing import Any
 
 
 DOCKER_ZERO_TIME = "0001-01-01T00:00:00Z"
-SUPPORTED_CONTAINER_VERSION = "1.3.1"
+SUPPORTED_CONTAINER_VERSION = "1.4.1"
 
 
 class ShimError(Exception):

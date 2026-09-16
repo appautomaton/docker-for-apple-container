@@ -5,7 +5,7 @@ deployment project in the sibling `armada/` directory.
 
 ## Runtime contract
 
-- Support exactly Apple `container` **1.3.1** on macOS 26. Do not add backward
+- Support exactly Apple `container` **1.4.1** on macOS 26. Do not add backward
   compatibility paths or claim support for unverified newer releases.
 - When the supported runtime advances, update the code, fixtures, and README.
   Refresh the centrally published website in
