@@ -15,7 +15,7 @@ class InspectTests(test_cli.ShimCLITestCase):
                 result = self.docker("inspect", "current")
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(result.stdout, "")
-                self.assertIn("expected Apple container 1.3.1", result.stderr)
+                self.assertIn("expected Apple container 1.4.1", result.stderr)
 
     def run_container(
         self, name: str, *, labels: tuple[str, ...] = (), network: str | None = None
