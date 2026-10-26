@@ -28,8 +28,7 @@ Homepage = "https://github.com/appautomaton/docker-for-apple-container"
 Repository = "https://github.com/appautomaton/docker-for-apple-container"
 
 # Version is derived from the latest git tag (e.g. v0.1.3) by hatch-vcs.
-# It flows to the wheel and package metadata. After a validated release, refresh
-# the version and date in the centrally published website module separately.
+# It flows to the wheel and package metadata.
 [tool.hatch.version]
 source = "vcs"
 
