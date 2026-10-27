@@ -51,6 +51,10 @@ After any of these, run `docker` as usual. If a tool resolves its Docker binary
 from an environment variable or config setting, point that at the installed
 `docker` (or the repo's `bin/docker`).
 
+The shim uses the Apple `container` binary named by
+`CONTAINER_DOCKER_SHIM_CONTAINER` when set; otherwise it finds `container` on
+your `PATH`.
+
 ## Requirements
 
 - macOS 26 with Apple `container` 1.6.1 only

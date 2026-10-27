@@ -578,6 +578,33 @@ class ShimCLITestCase(unittest.TestCase):
         path.write_text(json.dumps(data))
 
 
+class ContainerBinaryResolutionTests(ShimCLITestCase):
+    """The container binary comes from the env override, else from PATH."""
+
+    def test_path_lookup_used_when_override_unset(self) -> None:
+        self.env.pop("CONTAINER_DOCKER_SHIM_CONTAINER", None)
+        self.env["PATH"] = f"{self.root}{os.pathsep}{self.env.get('PATH', '')}"
+        result = self.docker("ps")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_override_wins_over_path(self) -> None:
+        self.env["CONTAINER_DOCKER_SHIM_CONTAINER"] = str(self.fake)
+        empty = self.root / "empty"
+        empty.mkdir()
+        self.env["PATH"] = str(empty)
+        result = self.docker("ps")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_not_found_reports_clear_error(self) -> None:
+        self.env.pop("CONTAINER_DOCKER_SHIM_CONTAINER", None)
+        empty = self.root / "empty"
+        empty.mkdir()
+        self.env["PATH"] = str(empty)
+        result = self.docker("ps")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Apple container CLI not found", result.stderr)
+
+
 class ContainerQueryTests(ShimCLITestCase):
     """Docker container-list subset backed by Apple list JSON.
 
