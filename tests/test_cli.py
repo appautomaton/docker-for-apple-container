@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCKER = ROOT / "bin" / "docker"
 
 
-FAKE_CONTAINER = r"""#!/usr/bin/env python3
+FAKE_CONTAINER = f"#!{sys.executable}\n" + r"""
 import json
 import os
 import sys
