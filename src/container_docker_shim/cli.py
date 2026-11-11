@@ -5,6 +5,7 @@ import json
 import os
 import platform as host_platform
 import re
+import shutil
 import subprocess
 import sys
 import uuid
@@ -22,7 +23,10 @@ class ShimError(Exception):
 
 
 def _container_bin() -> str:
-    return os.environ.get("CONTAINER_DOCKER_SHIM_CONTAINER", "/usr/local/bin/container")
+    override = os.environ.get("CONTAINER_DOCKER_SHIM_CONTAINER")
+    if override:
+        return override
+    return shutil.which("container") or "container"
 
 
 def _debug(message: str) -> None:

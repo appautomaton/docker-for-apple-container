@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCKER = ROOT / "bin" / "docker"
 
 
-FAKE_CONTAINER = r"""#!/usr/bin/env python3
+FAKE_CONTAINER = f"#!{sys.executable}\n" + r"""
 import json
 import os
 import sys
@@ -576,6 +576,33 @@ class ShimCLITestCase(unittest.TestCase):
         data = json.loads(path.read_text())
         data.update(updates)
         path.write_text(json.dumps(data))
+
+
+class ContainerBinaryResolutionTests(ShimCLITestCase):
+    """The container binary comes from the env override, else from PATH."""
+
+    def test_path_lookup_used_when_override_unset(self) -> None:
+        self.env.pop("CONTAINER_DOCKER_SHIM_CONTAINER", None)
+        self.env["PATH"] = f"{self.root}{os.pathsep}{self.env.get('PATH', '')}"
+        result = self.docker("ps")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_override_wins_over_path(self) -> None:
+        self.env["CONTAINER_DOCKER_SHIM_CONTAINER"] = str(self.fake)
+        empty = self.root / "empty"
+        empty.mkdir()
+        self.env["PATH"] = str(empty)
+        result = self.docker("ps")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_not_found_reports_clear_error(self) -> None:
+        self.env.pop("CONTAINER_DOCKER_SHIM_CONTAINER", None)
+        empty = self.root / "empty"
+        empty.mkdir()
+        self.env["PATH"] = str(empty)
+        result = self.docker("ps")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Apple container CLI not found", result.stderr)
 
 
 class ContainerQueryTests(ShimCLITestCase):
